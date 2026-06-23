@@ -11,7 +11,7 @@ Pull current charts and signals from Steam, mobile top charts, and short-form vi
 Score which mechanics are durable vs. hype, identify underserved genres/audiences, and track who else is already mining this space.
 
 **Phase 3 — Synthesis** (`game_concepts.md`, `leaderboard.md`)
-Combine trend + gap analysis into concrete game concepts, and rank current top trending titles on a leaderboard.
+Combine trend + gap analysis into concrete game concepts (4 per run: Safe / Aggressive / AI-Native / Solo-Developer), and rank the top 25 concepts ever generated on a cross-run leaderboard.
 
 ## Files
 
@@ -22,8 +22,8 @@ Combine trend + gap analysis into concrete game concepts, and rank current top t
 | `mechanics_confidence.md` | Mechanics scored by durability/confidence |
 | `market_gaps.md` | Underserved genres, audiences, niches |
 | `competitors.md` | Existing trend-intelligence players in this space |
-| `game_concepts.md` | Generated concepts from trend + gap synthesis |
-| `leaderboard.md` | Current top trending games, ranked |
+| `game_concepts.md` | Generated concepts from trend + gap synthesis, with a pinned Current Top Concept |
+| `leaderboard.md` | Top 25 highest-scoring concepts ever generated, ranked |
 
 ## Cadence
 
