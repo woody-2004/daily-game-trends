@@ -1,20 +1,36 @@
-# Leaderboard — Top 25 Concepts Ever Generated
+# Leaderboard — Top 25 Generated Game Concepts
 
-Ranked by rubric average (Viral Potential, Buildability, Market Gap, Retention Strength — see `game_concepts.md` for full rubric and per-concept breakdowns). Max 25 entries; lowest-scoring entry is dropped when a new concept scores higher and the list is already full.
+Ranked by composite score (V + B + G + R, each 1–10, max 40). Full rubric and per-concept breakdowns in `game_concepts.md`. Lowest-scoring entry dropped when 25 slots are full and a new concept scores higher.
 
-_Note: the 2026-06-24 run used this file for a "top trending games by momentum" table; that table now lives at the bottom of `trends/2026-06-24.md`, and this file tracks generated concepts as originally specified._
-
-| Rank | Concept | Score | One-line Hook | Date First Generated | Type |
+| Rank | Score | Concept | Hook (one line) | Type | Date |
 |---|---|---|---|---|---|
-| 1 | Hearth | 7.25 | A persistent AI agent runs your village while you're away, then tells you the story when you get back. | 2026-06-23 | AI-Native |
-| 2 | Tideglass | 7.0 | Idle aquarium collector where your prize fish can get netted by raiders if you don't defend the tank. | 2026-06-23 | Safe |
-| 3 | Brainrot Olympics | 7.0 | Meme creatures you collect compete in live mass-viewer events, with raids in between. | 2026-06-23 | Aggressive |
-| 4 | Settlement of Spires | 7.0 | Cozy roguelike deckbuilder where your TikTok/Discord audience natively votes on run decisions. | 2026-06-24 | Aggressive/Hybrid |
-| 5 | Pocket Raid | 6.25 | Minimal-scope idle garden with a once-a-day async raid — built to ship solo in weeks, not months. | 2026-06-23 | Solo-Developer |
-| 6 | Quietkeep | 6.25 | Wellness/cozy life-sim built for 5–10 minute daily sessions, aimed at the $3.8B gamified-health gap. | 2026-06-24 | Solo-Developer/Wellness |
-| 7 | Recess League | 6.0 | Roguelike-deckbuilder spin on a franchise-locked niche genre (e.g., racing) — progression by runs, not grind. | 2026-06-24 | Niche |
+| 1 | **30/40** | Nightfall Deckkeeper | Roguelike deckbuilder that's cozy by day and horror-survival by night — build your deck at dawn, fight forest monsters at dusk. | Safe | 2026-07-02 |
+| 1 | **30/40** | Settlement of Spires | Cozy roguelike deckbuilder where your TikTok/Discord audience natively votes on every run decision. | Safe/Hybrid | 2026-06-24 |
+| 1 | **30/40** | The Rogue Protocol | Cyberpunk heist game with a real LLM-powered AI partner who remembers every promise you broke and may betray you. | AI-Native | 2026-07-02 |
+| 4 | **29/40** | Hearth | A persistent AI agent runs your village while you're offline, then tells you the story — and asks for new orders — when you return. | AI-Native | 2026-06-23 |
+| 4 | **29/40** | Taskbar Dungeon | Tiny 1-bit dungeon crawler in your system tray; heroes auto-battle while you work, stream audience emoji-votes on floor branches. | Solo-Dev | 2026-07-02 |
+| 6 | **28/40** | Brainrot Olympics | Meme creatures you collect compete in live mass-viewer events, with raids to steal unguarded creatures between events. | Aggressive | 2026-06-23 |
+| 6 | **28/40** | Corporate Mole | Social deduction hide-and-seek in a realistic office; one player is a robot infiltrator blending into NPC coworkers. | Aggressive | 2026-07-02 |
+| 6 | **28/40** | Tideglass | Idle aquarium collector where your prize fish can get netted by other players' daily raids if you don't defend your tank. | Safe | 2026-06-23 |
+| 9 | **25/40** | Pocket Raid | Minimal-scope idle garden with a once-a-day async raid — built to ship solo in weeks, not months. | Solo-Dev | 2026-06-23 |
+| 9 | **25/40** | Quietkeep | Wellness/cozy life-sim built for 5–10 minute daily sessions, targeting the $3.8B gamified-health gap. | Solo-Dev | 2026-06-24 |
+| 11 | **24/40** | Recess League | Roguelike deckbuilding for car upgrades instead of grinding unlock trees — niche racing without franchise competition. | Niche | 2026-06-24 |
 
-## Promotion/demotion log
+*11 of 25 slots filled. Leaderboard grows each run.*
 
-- 2026-06-23: Leaderboard initialized with the first 4 concepts ever generated.
-- 2026-07-02: Merged the parallel 2026-06-24 run. Its 3 concepts (Settlement of Spires, Recess League, Quietkeep) were retroactively scored on the standard rubric and inserted; none exceeded Hearth (7.25), so the top concept is unchanged. Leaderboard now has 7 of 25 slots filled.
+---
+
+## Promotion / Demotion Log
+
+| Date | Event |
+|---|---|
+| 2026-06-23 | Leaderboard initialized. Hearth (29/40) set as top concept. 4 slots filled. |
+| 2026-07-02 | Parallel 2026-06-24 run merged: 3 concepts added (Settlement of Spires 30, Quietkeep 25, Recess League 24). Settlement of Spires ties Hearth but with higher Retention (R9 vs R8). |
+| 2026-07-02 | Today's 4 new concepts added. Nightfall Deckkeeper (30) and The Rogue Protocol (30) both beat Hearth (29) — Hearth demoted to #4. Nightfall Deckkeeper promoted to #1 (wins buildability tiebreaker B8 over Settlement of Spires B6). |
+
+---
+
+## Notes
+
+- **Current score threshold for entry:** 25/40 (equal to Quietkeep and Pocket Raid at #9). Any new concept scoring 26+ enters and drops the lowest current entry once the list reaches 25.
+- Tiebreaker order: (1) Retention, (2) Market Gap, (3) Buildability, (4) date (earlier = higher rank).

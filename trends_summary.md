@@ -1,45 +1,55 @@
-# Trends Summary (cumulative, running)
+# Trends Summary — Updated 2026-07-02
+*(Cumulative across all runs: 2026-06-23, 2026-06-24, 2026-07-02)*
 
-Updated each run from `trends/YYYY-MM-DD.md`. This file tracks frequency across runs — "Runs Seen" increments only when a genre/mechanic/theme reappears in a later day's discovery file, not just because it was big once.
+Updated each run from `trends/YYYY-MM-DD.md`. "Runs Seen" increments only when a genre/mechanic/theme reappears with supporting evidence in a later run, not just because it was big once.
 
-_Started: 2026-06-23. Incorporates the 2026-06-24 run (initialized separately; merged 2026-07-02)._
+---
 
-## Top genres/mechanics by frequency (descending)
+## Top Genres / Mechanics / Themes — Ranked by Frequency + Opportunity
 
-| Genre/Mechanic/Theme | Runs Seen | First Seen | Last Seen | Representative Evidence |
+| Genre / Mechanic / Theme | Runs Seen | First Seen | Last Seen | Key Evidence |
 |---|---|---|---|---|
-| Cozy crafting/farming/systems hybrids | 2 | 2026-06-23 | 2026-06-24 | Solarpunk, $973M Steam cozy market (06-23); Islantiles, Dreamlight Valley, cozy underserved on TikTok (06-24) |
-| UGC / sandbox platform dominance | 2 | 2026-06-23 | 2026-06-24 | Roblox mobile install charts (06-23); Roblox 144.5M DAU (06-24) |
-| Competitive evergreen shooters (CS2/PUBG-class) | 2 | 2026-06-23 | 2026-06-24 | CS2 #1 revenue + Twitch (06-23); CS2 935K CCU, PUBG 200K+ (06-24) |
-| AI-driven content / AI NPC-agent potential | 2 | 2026-06-23 | 2026-06-24 | $1.79B genAI-gaming market (06-23); AI-driven content a dominant TikTok gaming category, but "high hype, thin retention data" (06-24) |
-| Nostalgia remakes / retro revivals | 2 | 2026-06-23 | 2026-06-24 | Gothic 1 Remake #2 seller (06-23); TikTok retro-revival content category (06-24) |
-| Roguelike deckbuilding | 2 | 2026-06-23 | 2026-06-24 | itch.io horror-deckbuilder micro-genre (06-23, weak signal); Slay the Spire 2 $108M/5.3M copies in 3 weeks, Balatro reference point (06-24, strong signal) |
-| Idle / offline progression | 1 | 2026-06-23 | 2026-06-23 | Grow a Garden 2, Block Blast! (session-idle adjacent) |
-| Collection + rarity-tier gacha | 1 | 2026-06-23 | 2026-06-23 | Steal a Brainrot, Grow a Garden 2, Honor of Kings skins |
-| Steal/raid loss-aversion layer | 1 | 2026-06-23 | 2026-06-23 | Steal a Brainrot, Grow a Garden 2 (night raids) |
-| Co-op survival horror chaos | 1 | 2026-06-23 | 2026-06-23 | 99 Nights in the Forest |
-| Social roleplay/hangout sandbox | 1 | 2026-06-23 | 2026-06-23 | Brookhaven, Adopt Me |
-| Competitive skin-economy status | 1 | 2026-06-23 | 2026-06-23 | CS2, Honor of Kings |
-| ARPG loot-grind resurgence | 1 | 2026-06-23 | 2026-06-23 | Path of Exile 2 (cross-confirmed Steam + Twitch) |
-| Meme/absurdist humor as retention driver | 1 | 2026-06-23 | 2026-06-23 | Steal a Brainrot ("brainrot" meme culture) |
-| Live FOMO events (concerts, timed crossovers) | 1 | 2026-06-23 | 2026-06-23 | Steal a Brainrot x Bruno Mars concert (12.8M CCU) |
-| Low-skill-floor puzzle loops | 1 | 2026-06-23 | 2026-06-23 | Block Blast! (#1 global downloads) |
-| Audience-voted / decision-based livestream mechanics | 1 | 2026-06-24 | 2026-06-24 | Fastest-growing TikTok gaming format; unproven as a standalone product |
+| Roguelike deckbuilding | 3 | 2026-06-23 | 2026-07-02 | itch.io micro-genre (Jun 23); Slay the Spire 2 $108M/5.3M copies (Jun 24); Balatro #1 paid iOS+Google Play (Jul 2) |
+| Cozy crafting/farming + systems hybrids | 3 | 2026-06-23 | 2026-07-02 | $973M Steam cozy market (Jun 23); Islantiles/Dreamlight Valley (Jun 24); Grow a Garden 2 35B visits + night raids (Jul 2) |
+| UGC / sandbox platform dominance | 3 | 2026-06-23 | 2026-07-02 | Roblox top-3 mobile installs (Jun 23); 144.5M DAU (Jun 24); 99 Nights 14.2M peak (Jul 2) |
+| Idle / offline progression | 2 | 2026-06-23 | 2026-07-02 | Grow a Garden 22.3M CCU, Steal a Brainrot (Jun 23); TBH: Task Bar Hero 445K CCU Steam (Jul 2) |
+| Collection + rarity-tier gacha | 2 | 2026-06-23 | 2026-07-02 | Steal a Brainrot, Honor of Kings (Jun 23); Balatro card collection on mobile (Jul 2) |
+| Steal / raid loss-aversion layer | 2 | 2026-06-23 | 2026-07-02 | Steal a Brainrot's defining mechanic (Jun 23); Grow a Garden 2 night raids launched (Jul 2) |
+| Clip-native / audience-voted interactive mechanics | 3 | 2026-06-23 | 2026-07-02 | Audience-vote gaming (Jun 23); fastest-rising TikTok format (Jun 24); MECCHA CHAMELEON IS this mechanic as a shipped $5.99 product (Jul 2) |
+| Horror survival (timed / night-based) | 2 | 2026-06-23 | 2026-07-02 | 99 Nights in the Forest 442K CCU (Jun 23); 14.2M peak CCU confirmed (Jul 2) |
+| Meme / absurdist humor as retention driver | 2 | 2026-06-23 | 2026-07-02 | Steal a Brainrot "brainrot" culture (Jun 23); MECCHA CHAMELEON + Bongo Cat viral moments (Jul 2) |
+| Social deception / camouflage as viral clip factory | 1 | 2026-07-02 | 2026-07-02 | MECCHA CHAMELEON: $5.99 solo dev, 244K CCU, 3M week-1 copies, 57K Twitch viewers beating VALORANT |
+| Ambient / desktop gaming with real-economy hook | 1 | 2026-07-02 | 2026-07-02 | TBH: Task Bar Hero 445K CCU, Steam Market integration drives grind loop |
+| Reactive / skill-expressive turn-based combat | 1 | 2026-07-02 | 2026-07-02 | Clair Obscur Expedition 33: 8M copies, highest Metacritic userscore ever |
+| Competitive evergreen shooters | 2 | 2026-06-23 | 2026-06-24 | CS2 #1 revenue+Twitch (Jun 23); 859K CCU (Jul 2) |
+| AI-driven content / AI agent gameplay potential | 3 | 2026-06-23 | 2026-07-02 | $1.79B genAI market (Jun 23); high hype, thin retention data (Jun 24); API costs now viable for per-session AI partners (Jul 2) |
+| Nostalgia remakes / retro revivals | 2 | 2026-06-23 | 2026-06-24 | Gothic 1 Remake #2 seller (Jun 23); TikTok retro-revival content category (Jun 24) |
+| Live FOMO events (concerts / timed crossovers) | 1 | 2026-06-23 | 2026-06-23 | Steal a Brainrot × Bruno Mars: 12.8M CCU |
+| Social roleplay / hangout sandbox | 2 | 2026-06-23 | 2026-07-02 | Brookhaven 665K CCU, Adopt Me 531K CCU (structural, stable) |
+| Battle royale / extraction on PC + mobile | 2 | 2026-06-23 | 2026-07-02 | PUBG 278K Steam CCU, Free Fire 13.95M DAU — large but flat, mature category |
 | Wellness / gamified health | 1 | 2026-06-24 | 2026-06-24 | $3.8B 2026 market, game studios largely absent |
-| TikTok as top indie discovery channel | 1 | 2026-06-24 | 2026-06-24 | Cited as #1 marketing channel for small studios |
+| Low-skill-floor casual puzzle loop | 1 | 2026-06-23 | 2026-06-23 | Block Blast! #1 global downloads |
+| ARPG loot-grind resurgence | 1 | 2026-06-23 | 2026-06-23 | Path of Exile 2 cross-confirmed Steam + Twitch (likely season spike) |
 
-## Opportunity zones (underrepresented relative to demand signal)
+---
 
-See also `market_gaps.md` (from the 2026-06-24 run) for a complementary gap list — the two lists agree on the first item below.
+## Opportunity Zones (underrepresented relative to demand signal)
 
-- **AI agent as the actual gameplay loop** (not a chatbot skin) — large industry investment, zero breakout consumer hit yet; 06-24 run independently flagged "high hype, thin retention data," which is exactly what a pre-breakout white space looks like.
-- **TikTok-native / audience-voted interactive games** — trending as a format, but existing implementations are streaming gimmicks bolted onto other games, not purpose-built products (06-24 finding).
-- **Cross-pollinating idle-collection + raid-loss-aversion into new themes** (aquariums, space stations) — mechanic proven twice (Grow a Garden, Steal a Brainrot) but unexplored outside creature/plant themes.
-- **Solo-buildable horror/deckbuilder hybrids** — recurring itch.io micro-genre interest with no dominant title.
-- **Cozy + light-strategy crossover, all-ages** — cozy audience large and underserved relative to competitive content; few dedicated hybrids beyond Islantiles.
+1. **AI agent as the actual gameplay loop** — $1.79B+ market, zero breakout consumer title. The Rogue Protocol concept (30/40 score) targets this directly. Hearth (Jun 23) also targets it. First mover gets a clear run.
+2. **Clip-native social deception on mobile** — MECCHA CHAMELEON is PC-only ($5.99 on Steam). A mobile-first camouflage/hide-and-seek game with TikTok share button built in is an open lane.
+3. **Horror survival for non-Roblox platforms** — 14.2M concurrent peak proves the appetite. No equivalent breakout on Steam or mobile in this exact format.
+4. **Cozy + light-strategy crossover (all-ages)** — Islantiles is the only real entrant. Demand is proven (Grow a Garden, Dreamlight Valley), but the "cozy + strategic card/deckbuilder" combination remains rare.
+5. **Ambient desktop gaming on mobile** — TBH: Task Bar Hero is Steam/Windows only. "Game that runs alongside your phone" equivalents exist (Apple Watch games, notification-based idle) but no breakout title has combined real-economy + idle on mobile.
+6. **Roguelike deckbuilder with horror theming** — Nightfall Deckkeeper concept. Deckbuilding is #1 confidence mechanic; horror survival is #4 new; no Steam title blends both into a single cohesive loop.
 
-## Platform coverage gaps to close next run
+---
 
-- YouTube trending-gaming-video data (need sharper queries).
-- Live SteamDB/Steam Charts concurrent numbers pulled directly rather than via third-party summary.
-- Reddit week-specific "top posts" rather than subreddit-stats aggregators.
+## Platform Coverage Notes
+
+- **Reddit direct access:** Not available any run to date; signals inferred from search indexing and press coverage.
+- **SteamDB/Steam Charts direct access:** Limited; data from tracker site aggregates (steamcharts.com, steambase.io, etc.) and press coverage. May have slight delays vs. real-time.
+- **itch.io:** Coverage limited to sale/featured lists, not real-time trending charts.
+- **Fortnite Creative:** No data accessed in any run to date — gap to close.
+- **YouTube gaming trends:** Inferred from TikTok/Twitch coverage; no direct YouTube trending data accessed.
+
+Full raw data: [`trends/2026-06-23.md`](trends/2026-06-23.md) | [`trends/2026-06-24.md`](trends/2026-06-24.md) | [`trends/2026-07-02.md`](trends/2026-07-02.md)
