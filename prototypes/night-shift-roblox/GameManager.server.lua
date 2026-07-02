@@ -14,8 +14,43 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local SoundService = game:GetService("SoundService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 Players.CharacterAutoLoads = false
+
+-- ===================== SOUND ASSETS =====================
+-- PLACEHOLDERS — I can't verify live Roblox catalog IDs without network
+-- access in this build session. Swap these for real free SFX in ~5 min:
+-- Studio -> View tab -> Toolbox -> Audio -> search each term below ->
+-- right-click a result -> "Copy Asset ID" -> paste the number here.
+-- Until swapped, these play silently (invalid ID = no sound, no error).
+local SOUND_IDS = {
+	ambientDay = "rbxassetid://0", -- search: "wind ambience" / "forest day loop"
+	ambientNight = "rbxassetid://0", -- search: "horror ambience" / "dark drone loop"
+	generatorHum = "rbxassetid://0", -- search: "machine hum loop" / "generator running"
+	generatorFail = "rbxassetid://0", -- search: "electrical zap" / "power down"
+	monsterGrowl = "rbxassetid://0", -- search: "monster growl loop" / "creature breathing"
+	heartbeat = "rbxassetid://0", -- search: "heartbeat loop"
+	killStinger = "rbxassetid://0", -- search: "horror jumpscare stinger"
+	dawnChime = "rbxassetid://0", -- search: "morning bell" / "success chime"
+	voteBell = "rbxassetid://0", -- search: "dramatic bell" / "tension sting"
+	repairTick = "rbxassetid://0", -- search: "mechanical click" / "tool tick"
+}
+
+local function makeSound(props: { [string]: any }): Sound
+	local s = Instance.new("Sound")
+	s.SoundId = props.SoundId or "rbxassetid://0"
+	s.Looped = props.Looped or false
+	s.Volume = props.Volume or 0.5
+	s.RollOffMaxDistance = props.RollOffMaxDistance or 60
+	s.RollOffMinDistance = props.RollOffMinDistance or 6
+	for k, v in props do
+		if k ~= "SoundId" then (s :: any)[k] = v end
+	end
+	s.Parent = props.Parent
+	return s
+end
 
 -- ===================== CONFIG =====================
 local MIN_PLAYERS = 3 -- 4+ recommended
@@ -64,9 +99,15 @@ local PrivateState = makeRemote("PrivateState")
 local Feed = makeRemote("Feed")
 local Toast = makeRemote("Toast")
 local Reveal = makeRemote("Reveal")
+local PlayStinger = makeRemote("PlayStinger") -- arg: sound key, one-shot, plays locally on every client
 local SabotageRequest = makeRemote("SabotageRequest")
 local LureRequest = makeRemote("LureRequest") -- arg: target UserId
 local VoteCast = makeRemote("VoteCast") -- arg: suspect UserId (0 = skip)
+local PurchasePass = makeRemote("PurchasePass") -- arg: pass key, opens the Roblox purchase prompt
+
+local function stinger(key: string)
+	PlayStinger:FireAllClients(key)
+end
 
 -- ===================== STATE =====================
 type Crew = {
@@ -87,6 +128,9 @@ type Generator = {
 	light: PointLight,
 	health: number,
 	broken: boolean,
+	humSound: Sound,
+	failSound: Sound,
+	repairSound: Sound,
 }
 
 local phase = "lobby" -- lobby | day | night | vote | reveal
@@ -158,6 +202,14 @@ spawnPoint.Transparency = 1
 spawnPoint.CanCollide = false
 spawnPoint.Parent = arena
 
+-- ===================== AMBIENT SOUND =====================
+local ambientDaySound = makeSound({
+	SoundId = SOUND_IDS.ambientDay, Looped = true, Volume = 0.35, Parent = SoundService,
+})
+local ambientNightSound = makeSound({
+	SoundId = SOUND_IDS.ambientNight, Looped = true, Volume = 0.4, Parent = SoundService,
+})
+
 -- Generators
 local function buildGenerators()
 	for i = 1, GENERATOR_COUNT do
@@ -208,13 +260,30 @@ local function buildGenerators()
 		barFill.BorderSizePixel = 0
 		barFill.Parent = barBack
 
+		local humSound = makeSound({
+			SoundId = SOUND_IDS.generatorHum, Looped = true, Volume = 0.5,
+			RollOffMaxDistance = 40, RollOffMinDistance = 4, Parent = body,
+		})
+		local failSound = makeSound({
+			SoundId = SOUND_IDS.generatorFail, Looped = false, Volume = 0.7,
+			RollOffMaxDistance = 60, RollOffMinDistance = 4, Parent = body,
+		})
+		local repairSound = makeSound({
+			SoundId = SOUND_IDS.repairTick, Looped = false, Volume = 0.4,
+			RollOffMaxDistance = 20, RollOffMinDistance = 3, Parent = body,
+		})
+
 		model.Parent = arena
-		local gen: Generator = { id = i, model = model, body = body, light = light, health = 100, broken = false }
+		local gen: Generator = {
+			id = i, model = model, body = body, light = light, health = 100, broken = false,
+			humSound = humSound, failSound = failSound, repairSound = repairSound,
+		}
 
 		prompt.Triggered:Connect(function(who: Player)
 			local c = crew[who.UserId]
 			if not matchActive or not c or c.ghost then return end
 			gen.health = math.min(100, gen.health + GEN_REPAIR_BOOST)
+			repairSound:Play()
 			if gen.broken and gen.health >= GEN_REVIVE_THRESHOLD then
 				gen.broken = false
 				Feed:FireAllClients("💡 Generator G-" .. i .. " is back online.")
@@ -239,6 +308,22 @@ local function updateGeneratorVisual(gen: Generator)
 			or frac > 0.4 and Color3.fromRGB(120, 220, 120)
 			or Color3.fromRGB(255, 195, 74)
 	end
+
+	local shouldHum = matchActive and phase == "night" and not gen.broken
+	if shouldHum and not gen.humSound.IsPlaying then
+		gen.humSound:Play()
+	elseif not shouldHum and gen.humSound.IsPlaying then
+		gen.humSound:Stop()
+	end
+end
+
+-- Call exactly once at the moment a generator's health hits zero.
+local function markGeneratorBroken(gen: Generator, cause: string)
+	gen.health = 0
+	gen.broken = true
+	gen.humSound:Stop()
+	gen.failSound:Play()
+	Feed:FireAllClients("🔻 Generator G-" .. gen.id .. " went DARK (" .. cause .. ").")
 end
 
 local function brokenCount(): number
@@ -260,6 +345,8 @@ local function setDay()
 	Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 150)
 	Lighting.FogEnd = 1000
 	Lighting.FogColor = Color3.fromRGB(180, 180, 190)
+	if ambientNightSound.IsPlaying then ambientNightSound:Stop() end
+	if not ambientDaySound.IsPlaying then ambientDaySound:Play() end
 end
 
 local function setNight()
@@ -268,29 +355,97 @@ local function setNight()
 	Lighting.OutdoorAmbient = Color3.fromRGB(6, 6, 12)
 	Lighting.FogEnd = 80
 	Lighting.FogColor = Color3.fromRGB(4, 4, 8)
+	if ambientDaySound.IsPlaying then ambientDaySound:Stop() end
+	if not ambientNightSound.IsPlaying then ambientNightSound:Play() end
 end
 setDay()
 
--- ===================== FLASHLIGHT =====================
+-- ===================== FLASHLIGHT + COSMETIC GAME PASSES =====================
+-- PLACEHOLDER PASS IDS — create the passes in the Creator Dashboard
+-- (your experience -> Monetization -> Passes -> Create), then paste each
+-- pass's numeric ID here. IDs of 0 are skipped safely (nothing breaks,
+-- nobody owns pass 0). Cosmetic only — no gameplay advantage, so the
+-- horror stays fair.
+local GAME_PASSES = {
+	{ id = 0, name = "Ember Beam", beamColor = Color3.fromRGB(255, 140, 60), handleColor = Color3.fromRGB(120, 50, 20) },
+	{ id = 0, name = "Spectral Beam", beamColor = Color3.fromRGB(120, 255, 235), handleColor = Color3.fromRGB(40, 90, 85) },
+	{ id = 0, name = "Bloodhunter Beam", beamColor = Color3.fromRGB(255, 60, 80), handleColor = Color3.fromRGB(90, 20, 25) },
+}
+
+local ownershipCache: { [number]: { [number]: boolean } } = {} -- userId -> passId -> owns
+
+local function ownsPass(player: Player, passId: number): boolean
+	if passId == 0 then return false end
+	local userCache = ownershipCache[player.UserId]
+	if userCache and userCache[passId] ~= nil then
+		return userCache[passId]
+	end
+	local ok, owns = pcall(function()
+		return MarketplaceService:UserOwnsGamePassAsync(player.UserId, passId)
+	end)
+	local result = ok and owns == true
+	ownershipCache[player.UserId] = ownershipCache[player.UserId] or {}
+	ownershipCache[player.UserId][passId] = result
+	return result
+end
+
 local function giveFlashlight(player: Player)
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	if not backpack or backpack:FindFirstChild("Flashlight") then return end
+
+	-- Default beam; the last owned pass in the list wins.
+	local beamColor = Color3.fromRGB(255, 255, 240)
+	local handleColor = Color3.fromRGB(40, 40, 40)
+	for _, pass in GAME_PASSES do
+		if ownsPass(player, pass.id) then
+			beamColor = pass.beamColor
+			handleColor = pass.handleColor
+		end
+	end
+
 	local tool = Instance.new("Tool")
 	tool.Name = "Flashlight"
 	tool.RequiresHandle = true
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
 	handle.Size = Vector3.new(0.5, 0.5, 1.6)
-	handle.Color = Color3.fromRGB(40, 40, 40)
+	handle.Color = handleColor
 	handle.Parent = tool
 	local spot = Instance.new("SpotLight")
 	spot.Range = 45
 	spot.Angle = 38
 	spot.Brightness = 4
 	spot.Face = Enum.NormalId.Front
+	spot.Color = beamColor
 	spot.Parent = handle
 	tool.Parent = backpack
 end
+
+PurchasePass.OnServerEvent:Connect(function(player: Player, passIndex: unknown)
+	if typeof(passIndex) ~= "number" then return end
+	local pass = GAME_PASSES[passIndex :: number]
+	if not pass or pass.id == 0 then return end
+	MarketplaceService:PromptGamePassPurchase(player, pass.id)
+end)
+
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player: Player, passId: number, purchased: boolean)
+	if purchased then
+		ownershipCache[player.UserId] = ownershipCache[player.UserId] or {}
+		ownershipCache[player.UserId][passId] = true
+		-- Refresh their flashlight with the new skin.
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		local oldTool = backpack and backpack:FindFirstChild("Flashlight")
+		if oldTool then oldTool:Destroy() end
+		local char = player.Character
+		local held = char and char:FindFirstChild("Flashlight")
+		if held then held:Destroy() end
+		giveFlashlight(player)
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	ownershipCache[player.UserId] = nil
+end)
 
 -- ===================== MONSTER (The Watcher) =====================
 local monster = Instance.new("Model")
@@ -315,6 +470,11 @@ for _, offset in { Vector3.new(-0.45, 2.5, -0.95), Vector3.new(0.45, 2.5, -0.95)
 	eye.Parent = monster
 end
 monster.PrimaryPart = core
+
+local monsterGrowlSound = makeSound({
+	SoundId = SOUND_IDS.monsterGrowl, Looped = true, Volume = 0.6,
+	RollOffMaxDistance = 70, RollOffMinDistance = 8, Parent = core,
+})
 
 local monsterHome = CFrame.new(0, -80, 0) -- hidden below the map by day
 monster:PivotTo(monsterHome)
@@ -348,6 +508,7 @@ local function killPlayer(c: Crew, cause: string)
 	if hum then hum.Health = 0 end
 	Feed:FireAllClients("🩸 " .. c.player.Name .. " " .. cause)
 	Toast:FireClient(c.player, "💀 The Watcher took you. You are a ghost until dawn.")
+	stinger("killStinger")
 end
 
 local function monsterStep(dt: number)
@@ -431,6 +592,7 @@ local function publicState()
 		safeZone = safeZoneActive(),
 		brokenGens = brokenCount(), totalGens = GENERATOR_COUNT,
 		players = playerList, generators = genList,
+		monsterPos = phase == "night" and { x = monsterPos.X, y = monsterPos.Y, z = monsterPos.Z } or nil,
 	}
 end
 
@@ -466,9 +628,7 @@ SabotageRequest.OnServerEvent:Connect(function(player: Player)
 	best.health -= MOLE_SABOTAGE_DAMAGE
 	Feed:FireAllClients("⚠ Generator G-" .. best.id .. " is failing fast!")
 	if best.health <= 0 then
-		best.health = 0
-		best.broken = true
-		Feed:FireAllClients("🔻 Generator G-" .. best.id .. " went DARK.")
+		markGeneratorBroken(best, "power surge")
 	end
 	sendPrivate(c)
 end)
@@ -520,6 +680,7 @@ local function endMatch(crewWin: boolean, reason: string)
 	})
 	syncAll()
 	monster:PivotTo(monsterHome)
+	monsterGrowlSound:Stop()
 	setDay()
 	task.wait(REVEAL_SECONDS)
 
@@ -666,6 +827,7 @@ local function runMatch()
 		monsterPos = Vector3.new(monsterPos.X, 3.5, monsterPos.Z)
 		timeLeft = NIGHT_SECONDS
 		Feed:FireAllClients("🌑 NIGHT " .. night .. ". It is here. Stay in the light.")
+		if not monsterGrowlSound.IsPlaying then monsterGrowlSound:Play() end
 
 		local TICK = 0.1
 		local sinceSync = 0
@@ -678,9 +840,7 @@ local function runMatch()
 				if not g.broken then
 					g.health -= GEN_DECAY_PER_SEC * TICK
 					if g.health <= 0 then
-						g.health = 0
-						g.broken = true
-						Feed:FireAllClients("🔻 Generator G-" .. g.id .. " went DARK.")
+						markGeneratorBroken(g, "wore down")
 					end
 				end
 				updateGeneratorVisual(g)
@@ -701,10 +861,13 @@ local function runMatch()
 
 		Feed:FireAllClients("🌅 You survived night " .. night .. ".")
 		monster:PivotTo(monsterHome)
+		monsterGrowlSound:Stop()
 		setDay()
+		stinger("dawnChime")
 
 		-- ===== DAWN VOTE (after every night except the last) =====
 		if night < NIGHTS then
+			stinger("voteBell")
 			if runVote() then return end
 		end
 	end

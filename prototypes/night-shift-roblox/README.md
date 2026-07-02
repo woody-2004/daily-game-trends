@@ -34,11 +34,17 @@ Everything ships in two scripts that build the whole game at runtime: arena, gen
 | `MOLE_SABOTAGE_PER_NIGHT` / `MOLE_LURE_PER_NIGHT` | 2 / 1 | Traitor power |
 | `SAFE_ZONE_RADIUS` | 14 | Size of the lamp's protection |
 
-## Roadmap after the core loop feels fun
+## What's built in (beyond the core loop)
+
+- **Full sound system** — day/night ambient loops, per-generator hum that cuts out on failure, monster growl, a proximity **heartbeat that speeds up as the Watcher closes in**, and stingers on kills/dawn/votes. Ships wired to placeholder IDs (silent) — swap in real free Toolbox audio in ~15 min, see `LAUNCH.md` §4.
+- **Cosmetic monetization scaffolding** — 3 flashlight-skin Game Passes (Ember/Spectral/Bloodhunter beams) with server-side ownership checks, purchase prompts, and an in-game SKINS shop button. Cosmetic only, no pay-to-win. Create the passes in the Creator Dashboard and paste their IDs into `GAME_PASSES`, see `LAUNCH.md` §3.
+- **`NightShift.rbxlx`** — one-click openable place file with everything embedded.
+- **`LAUNCH.md`** — store copy, icon/thumbnail briefs, settings checklist, QA script, launch sequence.
+
+## Roadmap after launch
 
 1. **Playtest question #1:** do people scream *and* laugh? Horror-with-friends succeeds when terror and comedy blend (the Lethal Company effect).
-2. **Sound design** — footstep audio for the Watcher, heartbeat when it's near, generator hum that cuts out. In horror, audio is 60% of the product; this prototype ships silent.
-3. Task variety beyond repair-holding (fuse mini-puzzles, two-person switches — forces splitting up).
-4. Watcher pathfinding around walls (it currently glides through cover — spooky, but a smarter monster reads better) via `PathfindingService`.
-5. Multiple monster types with different hunting rules; random facility layouts per match.
-6. Cosmetics monetization: flashlight skins, ghost appearances, victory poses. No pay-to-win.
+2. Task variety beyond repair-holding (fuse mini-puzzles, two-person switches — forces splitting up).
+3. Watcher pathfinding around walls (it currently glides through cover — spooky, but a smarter monster reads better) via `PathfindingService`.
+4. Multiple monster types with different hunting rules; random facility layouts per match.
+5. More cosmetics: ghost appearances, victory poses, kill effects.

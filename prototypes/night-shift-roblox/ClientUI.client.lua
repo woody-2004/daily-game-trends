@@ -5,6 +5,8 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -15,9 +17,38 @@ local PrivateState = remotes:WaitForChild("PrivateState") :: RemoteEvent
 local Feed = remotes:WaitForChild("Feed") :: RemoteEvent
 local Toast = remotes:WaitForChild("Toast") :: RemoteEvent
 local Reveal = remotes:WaitForChild("Reveal") :: RemoteEvent
+local PlayStinger = remotes:WaitForChild("PlayStinger") :: RemoteEvent
 local SabotageRequest = remotes:WaitForChild("SabotageRequest") :: RemoteEvent
 local LureRequest = remotes:WaitForChild("LureRequest") :: RemoteEvent
 local VoteCast = remotes:WaitForChild("VoteCast") :: RemoteEvent
+local PurchasePass = remotes:WaitForChild("PurchasePass") :: RemoteEvent
+
+-- PLACEHOLDERS — same caveat as the server: swap via Studio Toolbox (Audio
+-- search terms in the comment), then these one-shot stingers play for real.
+local STINGER_IDS = {
+	killStinger = "rbxassetid://0", -- "horror jumpscare stinger"
+	dawnChime = "rbxassetid://0", -- "morning bell" / "success chime"
+	voteBell = "rbxassetid://0", -- "dramatic bell" / "tension sting"
+}
+local heartbeatSound = Instance.new("Sound")
+heartbeatSound.SoundId = "rbxassetid://0" -- search: "heartbeat loop"
+heartbeatSound.Looped = true
+heartbeatSound.Volume = 0
+heartbeatSound.Parent = SoundService
+
+PlayStinger.OnClientEvent:Connect(function(key: string)
+	local id = STINGER_IDS[key]
+	if not id then return end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = 0.8
+	s.Parent = SoundService
+	s.Ended:Connect(function() s:Destroy() end)
+	s:Play()
+	task.delay(6, function()
+		if s.Parent then s:Destroy() end
+	end)
+end)
 
 -- ===================== GUI HELPERS =====================
 local gui = Instance.new("ScreenGui")
@@ -123,6 +154,33 @@ lureList.Parent = lurePicker
 local lureLayout = Instance.new("UIListLayout")
 lureLayout.Padding = UDim.new(0, 4)
 lureLayout.Parent = lureList
+
+-- Flashlight skins shop (cosmetic Game Passes)
+local skinsBtn = button(gui, {
+	Size = UDim2.new(0, 110, 0, 36), Position = UDim2.new(0, 10, 0, 78),
+	BackgroundColor3 = Color3.fromRGB(50, 45, 80), Text = "🎨 SKINS",
+})
+local skinsPanel = panel(gui, {
+	Size = UDim2.new(0, 240, 0, 190), Position = UDim2.new(0, 10, 0, 120),
+	Visible = false, BackgroundTransparency = 0.1,
+})
+label(skinsPanel, {
+	Size = UDim2.new(1, 0, 0, 30), Text = "Flashlight Skins",
+	TextColor3 = Color3.fromRGB(200, 180, 255),
+})
+local SKIN_NAMES = { "Ember Beam 🔥", "Spectral Beam 👻", "Bloodhunter Beam 🩸" }
+for i, skinName in SKIN_NAMES do
+	local btn = button(skinsPanel, {
+		Size = UDim2.new(1, -16, 0, 40), Position = UDim2.new(0, 8, 0, 30 + (i - 1) * 48),
+		BackgroundColor3 = Color3.fromRGB(60, 55, 90), Text = skinName, Font = Enum.Font.Gotham,
+	})
+	btn.Activated:Connect(function()
+		PurchasePass:FireServer(i)
+	end)
+end
+skinsBtn.Activated:Connect(function()
+	skinsPanel.Visible = not skinsPanel.Visible
+end)
 
 -- Vote overlay
 local voteOverlay = panel(gui, {
@@ -263,9 +321,39 @@ skipBtn.Activated:Connect(function()
 end)
 
 -- ===================== REMOTE HANDLERS =====================
+-- Heartbeat: volume and speed rise as the Watcher closes in (night only).
+local latestMonsterPos: Vector3? = nil
+
+RunService.Heartbeat:Connect(function()
+	if phase ~= "night" or myGhost or not latestMonsterPos then
+		if heartbeatSound.Volume > 0 then heartbeatSound.Volume = 0 end
+		if heartbeatSound.IsPlaying then heartbeatSound:Stop() end
+		return
+	end
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart") :: Part?
+	if not hrp then return end
+	local dist = (hrp.Position - latestMonsterPos).Magnitude
+	local HEAR_RANGE = 55
+	if dist > HEAR_RANGE then
+		heartbeatSound.Volume = 0
+		if heartbeatSound.IsPlaying then heartbeatSound:Stop() end
+		return
+	end
+	local closeness = 1 - (dist / HEAR_RANGE) -- 0 far … 1 on top of you
+	heartbeatSound.Volume = closeness * 0.9
+	heartbeatSound.PlaybackSpeed = 0.9 + closeness * 0.8 -- races as it closes in
+	if not heartbeatSound.IsPlaying then heartbeatSound:Play() end
+end)
+
 StateSync.OnClientEvent:Connect(function(state)
 	local prevPhase = phase
 	phase = state.phase
+	if state.monsterPos then
+		latestMonsterPos = Vector3.new(state.monsterPos.x, state.monsterPos.y, state.monsterPos.z)
+	else
+		latestMonsterPos = nil
+	end
 	currentPlayers = {}
 	for _, p in state.players do
 		table.insert(currentPlayers, { userId = p.userId, name = p.name, ghost = p.ghost })
