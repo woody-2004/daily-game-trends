@@ -31,26 +31,25 @@ local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
 
 Players.CharacterAutoLoads = false
 
 -- ===================== SOUND ASSETS =====================
--- PLACEHOLDERS — I can't verify live Roblox catalog IDs without network
--- access in this build session. Swap these for real free SFX in ~5 min:
--- Studio -&gt; View tab -&gt; Toolbox -&gt; Audio -&gt; search each term below -&gt;
--- right-click a result -&gt; "Copy Asset ID" -&gt; paste the number here.
--- Until swapped, these play silently (invalid ID = no sound, no error).
+-- Free Creator Store audio, verified via the toolbox API (several are
+-- from Roblox's official SFX library). An ID that ever becomes
+-- unavailable just plays silently — nothing breaks.
 local SOUND_IDS = {
-	ambientDay = "rbxassetid://0", -- search: "wind ambience" / "forest day loop"
-	ambientNight = "rbxassetid://0", -- search: "horror ambience" / "dark drone loop"
-	generatorHum = "rbxassetid://0", -- search: "machine hum loop" / "generator running"
-	generatorFail = "rbxassetid://0", -- search: "electrical zap" / "power down"
-	monsterGrowl = "rbxassetid://0", -- search: "monster growl loop" / "creature breathing"
-	heartbeat = "rbxassetid://0", -- search: "heartbeat loop"
-	killStinger = "rbxassetid://0", -- search: "horror jumpscare stinger"
-	dawnChime = "rbxassetid://0", -- search: "morning bell" / "success chime"
-	voteBell = "rbxassetid://0", -- search: "dramatic bell" / "tension sting"
-	repairTick = "rbxassetid://0", -- search: "mechanical click" / "tool tick"
+	ambientDay = "rbxassetid://9112832288", -- Mountain Birds 1 (Roblox SFX)
+	ambientNight = "rbxassetid://9114795437", -- Hell Entrance 5 (Roblox SFX)
+	generatorHum = "rbxassetid://131125754036224", -- Coolant Pump loop
+	generatorFail = "rbxassetid://135847326073354", -- electricity_power_down_01
+	monsterGrowl = "rbxassetid://9112863181", -- Rumble Breath Growl 1 (Roblox SFX)
+	heartbeat = "rbxassetid://6202853067", -- Heartbeat (loop)
+	killStinger = "rbxassetid://3152021719", -- Slender dramatic sting
+	dawnChime = "rbxassetid://98646737427339", -- Sys_Objective_Complete
+	voteBell = "rbxassetid://9113804436", -- Church Bell Tolling 1 (Roblox SFX)
+	repairTick = "rbxassetid://9118046636", -- Ratchet Wrench Gear Winding (Roblox SFX)
 }
 
 local function makeSound(props: { [string]: any }): Sound
@@ -69,6 +68,9 @@ end
 
 -- ===================== CONFIG =====================
 local MIN_PLAYERS = 3 -- 4+ recommended
+if RunService:IsStudio() then
+	MIN_PLAYERS = 1 -- solo Studio playtests start immediately
+end
 local NIGHTS = 3
 local DAY_SECONDS = 40
 local NIGHT_SECONDS = 75
@@ -250,8 +252,61 @@ spawnPoint.Parent = arena
 -- Regenerated every match so no one memorizes the maze.
 local hauntedFolder: Folder? = nil
 
--- A dead tree: leaning cylindrical trunk plus gnarled branches, not a box.
-local function makeTree(folder: Folder, random: Random, pos: Vector3)
+-- Real dead-tree meshes from verified Creator Store authors, loaded at
+-- runtime. If any fail to load (asset removed, no network, not trusted
+-- for this place), makeTree silently falls back to procedural trees.
+local InsertService = game:GetService("InsertService")
+local TREE_ASSET_IDS = { 3573742671, 4870939709, 14385005411, 15113312104, 101740100427371 }
+local treeTemplates: { Model } = {}
+
+local function collectTreeTemplates(container: Instance)
+	-- Free models can hide scripts — strip every one, and anchor all parts.
+	for _, d in container:GetDescendants() do
+		if d:IsA("LuaSourceContainer") then
+			d:Destroy()
+		elseif d:IsA("BasePart") then
+			d.Anchored = true
+		end
+	end
+	local models: { Model } = {}
+	for _, child in container:GetChildren() do
+		if child:IsA("Model") then
+			table.insert(models, child)
+		end
+	end
+	if #models == 0 then
+		-- Loose parts at the top level: wrap them in one model.
+		local wrap = Instance.new("Model")
+		for _, child in container:GetChildren() do
+			if child:IsA("BasePart") then
+				child.Parent = wrap
+			end
+		end
+		if #wrap:GetChildren() &gt; 0 then
+			table.insert(models, wrap)
+		end
+	end
+	for _, model in models do
+		local height = model:GetExtentsSize().Y
+		if height &gt;= 8 and height &lt;= 120 then -- tree-sized, not a baseplate
+			table.insert(treeTemplates, model)
+		end
+	end
+end
+
+task.spawn(function()
+	for _, assetId in TREE_ASSET_IDS do
+		local ok, asset = pcall(function()
+			return InsertService:LoadAsset(assetId)
+		end)
+		if ok and asset then
+			collectTreeTemplates(asset)
+		end
+	end
+end)
+
+-- Fallback dead tree: leaning cylindrical trunk plus gnarled branches.
+local function makeProceduralTree(folder: Folder, random: Random, pos: Vector3)
 	local height = random:NextNumber(16, 30)
 	local trunkWidth = random:NextNumber(1.6, 3.2)
 	local yaw = math.rad(random:NextNumber(0, 360))
@@ -282,6 +337,27 @@ local function makeTree(folder: Folder, random: Random, pos: Vector3)
 		branch.Color = Color3.fromRGB(45, 35, 28)
 		branch.Parent = folder
 	end
+end
+
+local function makeTree(folder: Folder, random: Random, pos: Vector3)
+	if #treeTemplates == 0 then
+		makeProceduralTree(folder, random, pos)
+		return
+	end
+	local template = treeTemplates[random:NextInteger(1, #treeTemplates)]
+	local tree = template:Clone()
+	local currentHeight = tree:GetExtentsSize().Y
+	if currentHeight &gt; 1 then
+		pcall(function()
+			tree:ScaleTo(random:NextNumber(18, 32) / currentHeight)
+		end)
+	end
+	tree:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), 0))
+	-- Plant the trunk: drop the model so its bounding box sits in the mud.
+	local bbCF, bbSize = tree:GetBoundingBox()
+	local bottom = bbCF.Position.Y - bbSize.Y / 2
+	tree:PivotTo(tree:GetPivot() + Vector3.new(0, -bottom - 0.5, 0))
+	tree.Parent = folder
 end
 
 -- A crumbling brick wall: 2-3 segments of uneven height, like real ruins.
@@ -1064,7 +1140,11 @@ local function runMatch()
 		crew[player.UserId] = c
 		table.insert(roster, c)
 	end
-	roster[math.random(#roster)].role = "mole"
+	-- No mole in a solo test: alone as the mole, the "everyone is dead"
+	-- check would end the match the instant night falls.
+	if #roster &gt;= 2 then
+		roster[math.random(#roster)].role = "mole"
+	end
 
 	for _, g in generators do
 		g.health = 100
@@ -1200,6 +1280,15 @@ Players.PlayerAdded:Connect(function(player)
 	end
 end)
 
+-- CharacterAutoLoads is off, so spawn anyone who joined before this
+-- script connected PlayerAdded (always the case in solo Studio tests —
+-- without this, "Test" drops you into an empty void).
+for _, player in Players:GetPlayers() do
+	if not player.Character then
+		player:LoadCharacter()
+	end
+end
+
 Players.PlayerRemoving:Connect(function(player)
 	local c = crew[player.UserId]
 	if not c or not matchActive then return end
@@ -1270,15 +1359,14 @@ local LureRequest = remotes:WaitForChild("LureRequest") :: RemoteEvent
 local VoteCast = remotes:WaitForChild("VoteCast") :: RemoteEvent
 local PurchasePass = remotes:WaitForChild("PurchasePass") :: RemoteEvent
 
--- PLACEHOLDERS — same caveat as the server: swap via Studio Toolbox (Audio
--- search terms in the comment), then these one-shot stingers play for real.
+-- Free Creator Store audio (same set as the server's SOUND_IDS).
 local STINGER_IDS = {
-	killStinger = "rbxassetid://0", -- "horror jumpscare stinger"
-	dawnChime = "rbxassetid://0", -- "morning bell" / "success chime"
-	voteBell = "rbxassetid://0", -- "dramatic bell" / "tension sting"
+	killStinger = "rbxassetid://3152021719", -- Slender dramatic sting
+	dawnChime = "rbxassetid://98646737427339", -- Sys_Objective_Complete
+	voteBell = "rbxassetid://9113804436", -- Church Bell Tolling 1 (Roblox SFX)
 }
 local heartbeatSound = Instance.new("Sound")
-heartbeatSound.SoundId = "rbxassetid://0" -- search: "heartbeat loop"
+heartbeatSound.SoundId = "rbxassetid://6202853067" -- Heartbeat (loop)
 heartbeatSound.Looped = true
 heartbeatSound.Volume = 0
 heartbeatSound.Parent = SoundService

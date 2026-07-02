@@ -23,15 +23,14 @@ local LureRequest = remotes:WaitForChild("LureRequest") :: RemoteEvent
 local VoteCast = remotes:WaitForChild("VoteCast") :: RemoteEvent
 local PurchasePass = remotes:WaitForChild("PurchasePass") :: RemoteEvent
 
--- PLACEHOLDERS — same caveat as the server: swap via Studio Toolbox (Audio
--- search terms in the comment), then these one-shot stingers play for real.
+-- Free Creator Store audio (same set as the server's SOUND_IDS).
 local STINGER_IDS = {
-	killStinger = "rbxassetid://0", -- "horror jumpscare stinger"
-	dawnChime = "rbxassetid://0", -- "morning bell" / "success chime"
-	voteBell = "rbxassetid://0", -- "dramatic bell" / "tension sting"
+	killStinger = "rbxassetid://3152021719", -- Slender dramatic sting
+	dawnChime = "rbxassetid://98646737427339", -- Sys_Objective_Complete
+	voteBell = "rbxassetid://9113804436", -- Church Bell Tolling 1 (Roblox SFX)
 }
 local heartbeatSound = Instance.new("Sound")
-heartbeatSound.SoundId = "rbxassetid://0" -- search: "heartbeat loop"
+heartbeatSound.SoundId = "rbxassetid://6202853067" -- Heartbeat (loop)
 heartbeatSound.Looped = true
 heartbeatSound.Volume = 0
 heartbeatSound.Parent = SoundService

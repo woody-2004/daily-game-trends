@@ -53,24 +53,9 @@ Thumbnail rule of thumb: the **traitor smirk** is the story. Horror thumbnails a
 - [ ] **Monetization → Passes → create 3 passes** named Ember Beam / Spectral Beam / Bloodhunter Beam (suggested price: 49-99 Robux each), then paste their numeric IDs into `GAME_PASSES` at the top of `GameManager.server.lua`
 - [ ] **Age guidelines questionnaire** — answer honestly: mild fear themes, no blood/gore (the game only uses a 🩸 emoji in text), no realistic violence. Expect a "Moderate fear" content label; that keeps 9+ eligibility, which matters — a big slice of Roblox horror players are 9-12.
 
-## 4. Sound assets (15 minutes, in Studio)
+## 4. Sound assets — DONE ✔
 
-The code ships with a complete sound system wired to placeholder IDs (silent until swapped). In Studio: **View → Toolbox → Audio**, search each term, right-click → Copy Asset ID, paste into `SOUND_IDS` (top of `GameManager.server.lua`) and `STINGER_IDS` + heartbeat (top of `ClientUI.client.lua`):
-
-| Key | Search the Toolbox for |
-|---|---|
-| ambientDay | "wind ambience loop" |
-| ambientNight | "horror ambience drone" |
-| generatorHum | "machine hum loop" |
-| generatorFail | "power down electrical" |
-| monsterGrowl | "monster breathing loop" |
-| heartbeat (client) | "heartbeat loop" |
-| killStinger (client) | "horror jumpscare stinger" |
-| dawnChime (client) | "morning chime" |
-| voteBell (client) | "dramatic bell" |
-| repairTick | "wrench mechanical click" |
-
-Only use audio marked as free-to-use from the Toolbox — Roblox blocks unlicensed audio automatically, so anything the Toolbox lets you insert is safe.
+Real free Creator Store audio IDs (several from Roblox's official SFX library, found via the toolbox API) are wired into `SOUND_IDS` (`GameManager.server.lua`) and `STINGER_IDS` + heartbeat (`ClientUI.client.lua`). If any sound seems wrong in playtests, swap just that ID via Studio's Toolbox — an unavailable ID plays silently and never breaks the game.
 
 ## 5. QA checklist (run once with 3 Studio test clients before going public)
 
@@ -100,5 +85,5 @@ Only use audio marked as free-to-use from the Toolbox — Roblox blocks unlicens
 | Code changes, balance tuning, new features | Claude (this repo → push to Roblox via Open Cloud once network access is live in a fresh session) |
 | Publishing new versions via API | Claude (same as above) |
 | Creating passes, settings, voice chat, going public | You (Creator Dashboard) |
-| Sound ID swap-in (Toolbox is Studio-only) | You, once (15 min) |
+| Sound IDs | Done — wired in via the toolbox API |
 | Playtesting with humans | You + friends |
