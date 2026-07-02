@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "0.7.0"
+local GAME_VERSION = "0.8.0"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -66,16 +66,18 @@ local VOTE_SECONDS = 20
 local REVEAL_SECONDS = 20
 local LOBBY_COUNTDOWN = 10
 
--- Hand-placed generator spots: hidden near cover, 70+ studs apart so no
--- generator is ever visible from another through the fog.
+-- Every generator is tucked into its own named zone, 40+ studs apart,
+-- so "gen at the junkyard" means something and no two are ever visible
+-- from one spot through the fog.
 local GEN_POSITIONS = {
-	Vector3.new(85, 0, 60), -- NE forest edge
-	Vector3.new(-85, 0, 60), -- NW forest edge
-	Vector3.new(-95, 0, -15), -- behind the junkyard
-	Vector3.new(-45, 0, -95), -- S forest
-	Vector3.new(35, 0, -100), -- swamp edge
-	Vector3.new(100, 0, -20), -- E treeline
-	Vector3.new(-15, 0, 45), -- N yard
+	Vector3.new(72, 0, 32), -- inside the Factory
+	Vector3.new(55, 0, -45), -- inside the Barn
+	Vector3.new(-60, 0, -50), -- inside the Warehouse
+	Vector3.new(-70, 0, 28), -- Junkyard, among the wrecks
+	Vector3.new(0, 0, 96), -- under the Water Tower
+	Vector3.new(-30, 0, 68), -- the Abandoned Camp
+	Vector3.new(98, 0, -48), -- Maintenance Shed by the creek
+	Vector3.new(35, 0, -100), -- Swamp edge
 }
 local GENERATOR_COUNT = #GEN_POSITIONS
 local GEN_DECAY_PER_SEC = 4 -- night only
@@ -203,6 +205,8 @@ local KEEP_CLEAR: { { number } } = {
 	{ -25, 75, 9, 8 }, { 90, -15, 9, 8 }, -- Cabins
 	{ 0, 100, 11, 11 }, -- Water tower
 	{ 55, -95, 18, 14 }, -- Swamp pond
+	{ 98, -48, 9, 8 }, -- Maintenance shed
+	{ -85, -80, 8, 8 }, -- Radio tower
 }
 
 local function insideKeepClear(pos: Vector3): boolean
@@ -259,7 +263,9 @@ local function roadStrip(a: Vector3, b: Vector3)
 end
 
 pcall(function()
-	terrain:FillBlock(CFrame.new(0, -2, 0), Vector3.new(ARENA_SIZE + 30, 6, ARENA_SIZE + 30), Enum.Material.Ground)
+	-- Deep base extending far beyond the fence: from inside, the ground
+	-- reaches the horizon — never a floating square island.
+	terrain:FillBlock(CFrame.new(0, -19, 0), Vector3.new(ARENA_SIZE + 200, 40, ARENA_SIZE + 200), Enum.Material.Ground)
 	local rng = Random.new(7)
 	-- Overgrown grass patches.
 	for _ = 1, 110 do
@@ -269,10 +275,16 @@ pcall(function()
 	end
 	-- Gentle hills: mostly-buried spheres read as mounds, not walls.
 	for _, h in {
-		{ -100, -100, 26 }, { 105, -65, 20 }, { -105, 65, 22 }, { 100, 100, 26 },
-		{ -60, 105, 18 }, { 60, -110, 18 }, { -110, -40, 16 },
+		{ -100, -100, 20 }, { 105, -65, 18 }, { -105, 65, 18 }, { 100, 100, 20 },
+		{ -60, 105, 16 }, { 60, -110, 16 }, { -110, -40, 14 },
 	} do
-		terrain:FillBall(Vector3.new(h[1], 1 - h[3] * 0.72, h[2]), h[3], Enum.Material.Ground)
+		terrain:FillBall(Vector3.new(h[1], 1 - h[3] * 0.6, h[2]), h[3], Enum.Material.Ground)
+	end
+	-- Strict generator placement: flatten and clear every generator
+	-- site so no generator ends up on a slope or inside a hill.
+	for _, g in GEN_POSITIONS do
+		terrain:FillBlock(CFrame.new(g.X, -1.5, g.Z), Vector3.new(16, 5, 16), Enum.Material.Ground)
+		terrain:FillBlock(CFrame.new(g.X, 9, g.Z), Vector3.new(16, 16, 16), Enum.Material.Air)
 	end
 	-- Swamp in the SE: shallow water over mud.
 	terrain:FillBlock(CFrame.new(55, -0.4, -95), Vector3.new(34, 3, 26), Enum.Material.Mud)
@@ -287,35 +299,50 @@ pcall(function()
 		roadStrip(HUB, mid)
 		roadStrip(mid, g)
 	end
-	for _, seg in {
-		{ GEN_POSITIONS[1], GEN_POSITIONS[6] }, { GEN_POSITIONS[6], GEN_POSITIONS[5] },
-		{ GEN_POSITIONS[5], GEN_POSITIONS[4] }, { GEN_POSITIONS[4], GEN_POSITIONS[3] },
-		{ GEN_POSITIONS[3], GEN_POSITIONS[2] }, { GEN_POSITIONS[2], Vector3.new(0, 0, 92) },
-		{ Vector3.new(0, 0, 92), GEN_POSITIONS[1] },
-	} do
-		roadStrip(seg[1], seg[2])
+	-- Outer loop trail: water tower -> factory -> shed -> swamp ->
+	-- warehouse -> junkyard -> camp -> back (the barn sits on the way).
+	local ring = { 5, 1, 7, 8, 3, 4, 6, 5 }
+	for i = 1, #ring - 1 do
+		roadStrip(GEN_POSITIONS[ring[i]], GEN_POSITIONS[ring[i + 1]])
 	end
 	roadStrip(Vector3.new(0, 0, -17), Vector3.new(0, 0, -122)) -- exit road
+	-- Creek bed: a shallow walkable ditch running from the swamp east.
+	for _, seg in {
+		{ Vector3.new(66, 0, -90), Vector3.new(95, 0, -70) },
+		{ Vector3.new(95, 0, -70), Vector3.new(114, 0, -58) },
+	} do
+		local delta = seg[2] - seg[1]
+		local mid = (seg[1] + seg[2]) / 2
+		local yaw = math.atan2(delta.X, delta.Z)
+		terrain:FillBlock(CFrame.new(mid.X, 0.4, mid.Z) * CFrame.Angles(0, yaw, 0),
+			Vector3.new(6, 2.6, delta.Magnitude + 4), Enum.Material.Air)
+		terrain:FillBlock(CFrame.new(mid.X, -0.9, mid.Z) * CFrame.Angles(0, yaw, 0),
+			Vector3.new(6, 1.4, delta.Magnitude + 4), Enum.Material.Mud)
+		terrain:FillBlock(CFrame.new(mid.X, -0.3, mid.Z) * CFrame.Angles(0, yaw, 0),
+			Vector3.new(5, 0.7, delta.Magnitude + 4), Enum.Material.Water)
+	end
 end)
 
 -- ---- Stage 2: forest ----
 print("[NightShift] map: forest…")
 local function makePine(rng: Random, pos: Vector3)
-	local height = rng:NextNumber(14, 24)
+	-- Tiered silhouette: overlapping cylinders that shrink toward the
+	-- top, so it reads as a pine from the side, not stacked pancakes.
+	local height = rng:NextNumber(14, 26)
 	part({ Parent = forestFolder, Name = "PineTrunk",
-		Size = Vector3.new(1.3, height * 0.5, 1.3),
-		Position = pos + Vector3.new(0, height * 0.25, 0),
+		Size = Vector3.new(1.4, height * 0.42, 1.4),
+		Position = pos + Vector3.new(0, height * 0.21, 0),
 		Color = Color3.fromRGB(58, 44, 32), Material = Enum.Material.Wood })
-	local width = height * 0.52
-	local y = height * 0.42
-	for _ = 1, 3 do
+	local width = height * 0.46
+	local y = height * 0.38
+	for _ = 1, 4 do
 		part({ Parent = forestFolder, Name = "PineFoliage", Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(height * 0.24, width, width),
+			Size = Vector3.new(height * 0.2, width, width),
 			CFrame = CFrame.new(pos + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)),
-			Color = Color3.fromRGB(28 + rng:NextInteger(0, 8), 46 + rng:NextInteger(0, 8), 32),
-			Material = Enum.Material.Grass, CanCollide = false })
-		width *= 0.7
-		y += height * 0.2
+			Color = Color3.fromRGB(34 + rng:NextInteger(0, 10), 58 + rng:NextInteger(0, 10), 38),
+			Material = Enum.Material.LeafyGrass, CanCollide = false })
+		width *= 0.68
+		y += height * 0.17
 	end
 end
 
@@ -328,6 +355,25 @@ do
 		local pos = Vector3.new(math.cos(angle) * radius, FLOOR_TOP, math.sin(angle) * radius)
 		if scenerySpotFree(pos) then
 			makePine(rng, pos)
+		end
+	end
+	-- Outer world: forest continues beyond the fence so the boundary
+	-- reads as "the woods keep going", not the edge of the map.
+	for _ = 1, 130 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local radius = rng:NextNumber(126, 175)
+		makePine(rng, Vector3.new(math.cos(angle) * radius, FLOOR_TOP, math.sin(angle) * radius))
+	end
+	-- Dense low bushes: players vanish behind them every few steps.
+	for _ = 1, 90 do
+		local pos = Vector3.new(rng:NextNumber(-114, 114), 0, rng:NextNumber(-114, 114))
+		if scenerySpotFree(pos) then
+			local s = rng:NextNumber(2.4, 4.5)
+			part({ Parent = forestFolder, Name = "Bush", Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(s * 0.8, s, s),
+				CFrame = CFrame.new(pos + Vector3.new(0, FLOOR_TOP + s * 0.32, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+				Color = Color3.fromRGB(38 + rng:NextInteger(0, 10), 62 + rng:NextInteger(0, 10), 42),
+				Material = Enum.Material.LeafyGrass, CanCollide = false })
 		end
 	end
 	-- Forest pockets between locations, per the map sketch.
@@ -421,6 +467,8 @@ buildingShell("Cabin1", Vector3.new(-25, 0, 75), 13, 11, 7, { S = true },
 	Enum.Material.Wood, Color3.fromRGB(66, 50, 38))
 buildingShell("Cabin2", Vector3.new(90, 0, -15), 13, 11, 7, { W = true },
 	Enum.Material.Wood, Color3.fromRGB(66, 50, 38))
+buildingShell("MaintenanceShed", Vector3.new(98, 0, -48), 14, 12, 7, { W = true },
+	Enum.Material.Metal, Color3.fromRGB(72, 74, 70))
 
 -- Water tower: the landmark you navigate by.
 do
@@ -435,6 +483,41 @@ do
 	part({ Parent = wt, Name = "Tank", Shape = Enum.PartType.Cylinder, Size = Vector3.new(10, 13, 13),
 		CFrame = CFrame.new(0, FLOOR_TOP + 31, 100) * CFrame.Angles(0, 0, math.rad(90)),
 		Color = Color3.fromRGB(80, 58, 46), Material = Enum.Material.CorrodedMetal })
+end
+
+-- Radio tower: a second tall landmark, opposite the water tower, with
+-- a red light you can navigate by at night.
+do
+	local rt = Instance.new("Folder")
+	rt.Name = "RadioTower"
+	rt.Parent = buildingsFolder
+	local segW = 3.4
+	for s = 0, 3 do
+		part({ Parent = rt, Name = "MastSegment", Size = Vector3.new(segW, 12, segW),
+			Position = Vector3.new(-85, FLOOR_TOP + 6 + s * 12, -80),
+			Color = Color3.fromRGB(96, 60, 50), Material = Enum.Material.Metal })
+		segW *= 0.72
+	end
+	part({ Parent = rt, Name = "MastShack", Size = Vector3.new(8, 5, 7),
+		Position = Vector3.new(-78, FLOOR_TOP + 2.5, -84),
+		Color = Color3.fromRGB(70, 66, 60), Material = Enum.Material.Concrete })
+end
+
+-- Abandoned camp: fire ring and log seats by the north cabin.
+do
+	local rng = Random.new(37)
+	for i = 1, 6 do
+		local angle = (i / 6) * math.pi * 2
+		part({ Parent = propsFolder, Name = "CampStone", Size = Vector3.new(1.2, 0.9, 1.2),
+			CFrame = CFrame.new(-25 + math.cos(angle) * 2.2, FLOOR_TOP + 0.45, 62 + math.sin(angle) * 2.2)
+				* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0),
+			Color = Color3.fromRGB(80, 80, 78), Material = Enum.Material.Rock })
+	end
+	for _, seat in { { -20, 64, 30 }, { -29, 59, -50 } } do
+		part({ Parent = propsFolder, Name = "CampLog", Shape = Enum.PartType.Cylinder, Size = Vector3.new(6, 1.6, 1.6),
+			CFrame = CFrame.new(seat[1], FLOOR_TOP + 0.8, seat[2]) * CFrame.Angles(0, math.rad(seat[3]), 0),
+			Color = Color3.fromRGB(76, 58, 42), Material = Enum.Material.Wood })
+	end
 end
 
 -- The Discussion Hall: abandoned lodge meets industrial control room.
@@ -506,12 +589,14 @@ do
 	end)
 	part({ Parent = hall, Name = "HallChimney", Size = Vector3.new(3.5, H + 8, 3.5),
 		Position = Vector3.new(x0 - 1, base + (H + 8) / 2, 6), Color = Color3.fromRGB(78, 68, 62), Material = Enum.Material.Brick })
-	-- Pitched roof: two tilted slabs and a ridge beam.
+	-- Pitched roof: two slabs meeting at a ridge over the centerline
+	-- (positive X-rotation drops the far (+Z) edge, so the north slab
+	-- tilts down toward the eave and the pair peaks in the middle).
 	part({ Parent = hall, Name = "RoofSlabN", Size = Vector3.new(W + 3, 0.8, D / 2 + 3),
-		CFrame = CFrame.new(0, top + 2, D / 4) * CFrame.Angles(math.rad(-16), 0, 0),
+		CFrame = CFrame.new(0, top + 2, D / 4) * CFrame.Angles(math.rad(16), 0, 0),
 		Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Slate })
 	part({ Parent = hall, Name = "RoofSlabS", Size = Vector3.new(W + 3, 0.8, D / 2 + 3),
-		CFrame = CFrame.new(0, top + 2, -D / 4) * CFrame.Angles(math.rad(16), 0, 0),
+		CFrame = CFrame.new(0, top + 2, -D / 4) * CFrame.Angles(math.rad(-16), 0, 0),
 		Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Slate })
 	-- Long wooden table, benches, and the voting terminal.
 	part({ Parent = hall, Name = "TableTop", Size = Vector3.new(16, 0.8, 5),
@@ -653,18 +738,26 @@ do
 	end
 end
 
--- Rocks.
+-- Rocks: lone boulders plus a few big stacked formations.
 do
 	local rng = Random.new(31)
+	local function boulder(pos: Vector3, s: number)
+		part({ Parent = rocksFolder, Name = "Boulder",
+			Size = Vector3.new(s * rng:NextNumber(0.8, 1.4), s, s * rng:NextNumber(0.8, 1.4)),
+			CFrame = CFrame.new(pos + Vector3.new(0, FLOOR_TOP + s * 0.25, 0))
+				* CFrame.Angles(math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360))),
+			Color = Color3.fromRGB(72, 74, 70), Material = Enum.Material.Rock })
+	end
 	for _ = 1, 40 do
 		local pos = Vector3.new(rng:NextNumber(-114, 114), 0, rng:NextNumber(-114, 114))
 		if scenerySpotFree(pos) then
-			local s = rng:NextNumber(2.5, 7)
-			part({ Parent = rocksFolder, Name = "Boulder",
-				Size = Vector3.new(s * rng:NextNumber(0.8, 1.4), s, s * rng:NextNumber(0.8, 1.4)),
-				CFrame = CFrame.new(pos + Vector3.new(0, FLOOR_TOP + s * 0.25, 0))
-					* CFrame.Angles(math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360))),
-				Color = Color3.fromRGB(72, 74, 70), Material = Enum.Material.Rock })
+			boulder(pos, rng:NextNumber(2.5, 7))
+		end
+	end
+	-- Rock formations: clustered slabs big enough to hide behind.
+	for _, f in { Vector3.new(-15, 0, -55), Vector3.new(80, 0, 78), Vector3.new(-98, 0, 40) } do
+		for _ = 1, rng:NextInteger(3, 5) do
+			boulder(f + Vector3.new(rng:NextNumber(-6, 6), 0, rng:NextNumber(-6, 6)), rng:NextNumber(6, 10))
 		end
 	end
 end
@@ -883,7 +976,7 @@ local ambientNightSound = makeSound({
 	SoundId = SOUND_IDS.ambientNight, Looped = true, Volume = 0.4, Parent = SoundService,
 })
 
--- ---- Stage 5: generators (hand-placed, hidden near cover) ----
+-- ---- Stage 5: generators (one per named zone) ----
 local function buildGenerators()
 	print("[NightShift] map: generators…")
 	for i = 1, GENERATOR_COUNT do
@@ -891,6 +984,16 @@ local function buildGenerators()
 
 		local model = Instance.new("Model")
 		model.Name = "Generator_" .. i
+
+		-- Concrete service pad (slightly above building pads: no z-fight).
+		local pad = Instance.new("Part")
+		pad.Name = "ServicePad"
+		pad.Size = Vector3.new(9, 0.4, 9)
+		pad.Position = pos + Vector3.new(0, FLOOR_TOP + 0.26, 0)
+		pad.Anchored = true
+		pad.Color = Color3.fromRGB(84, 84, 86)
+		pad.Material = Enum.Material.Concrete
+		pad.Parent = model
 
 		local body = Instance.new("Part")
 		body.Name = "Body"
@@ -920,6 +1023,7 @@ local function buildGenerators()
 		billboard.Size = UDim2.fromOffset(120, 24)
 		billboard.StudsOffset = Vector3.new(0, 3.4, 0)
 		billboard.AlwaysOnTop = true
+		billboard.MaxDistance = 70 -- health bars only when you're close
 		billboard.Parent = body
 		local barBack = Instance.new("Frame")
 		barBack.Name = "BarBack"
@@ -1048,11 +1152,13 @@ local function setDay()
 	Lighting.ClockTime = 13
 	Lighting.Ambient = Color3.fromRGB(56, 56, 58)
 	Lighting.OutdoorAmbient = Color3.fromRGB(74, 74, 78)
-	atmosphere.Density = 0.3
-	atmosphere.Offset = 0.2
+	-- Medium-heavy fog even by day: you should never see the far side
+	-- of the site, or more than one generator zone at a time.
+	atmosphere.Density = 0.38
+	atmosphere.Offset = 0.15
 	atmosphere.Color = Color3.fromRGB(180, 178, 170)
 	atmosphere.Decay = Color3.fromRGB(96, 98, 104)
-	atmosphere.Haze = 1.6
+	atmosphere.Haze = 2
 	atmosphere.Glare = 0.1
 	colorGrade.Saturation = -0.18
 	colorGrade.Contrast = 0.06
