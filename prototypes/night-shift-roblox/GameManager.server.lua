@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "0.6.0"
+local GAME_VERSION = "0.7.0"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -66,7 +66,18 @@ local VOTE_SECONDS = 20
 local REVEAL_SECONDS = 20
 local LOBBY_COUNTDOWN = 10
 
-local GENERATOR_COUNT = 5
+-- Hand-placed generator spots: hidden near cover, 70+ studs apart so no
+-- generator is ever visible from another through the fog.
+local GEN_POSITIONS = {
+	Vector3.new(85, 0, 60), -- NE forest edge
+	Vector3.new(-85, 0, 60), -- NW forest edge
+	Vector3.new(-95, 0, -15), -- behind the junkyard
+	Vector3.new(-45, 0, -95), -- S forest
+	Vector3.new(35, 0, -100), -- swamp edge
+	Vector3.new(100, 0, -20), -- E treeline
+	Vector3.new(-15, 0, 45), -- N yard
+}
+local GENERATOR_COUNT = #GEN_POSITIONS
 local GEN_DECAY_PER_SEC = 4 -- night only
 local GEN_REPAIR_BOOST = 10
 local GEN_REVIVE_THRESHOLD = 30 -- broken generator turns back on at this health
@@ -84,10 +95,8 @@ local MOLE_SABOTAGE_COOLDOWN = 20
 local MOLE_LURE_PER_NIGHT = 1
 local MOLE_LURE_DURATION = 8
 
-local ARENA_SIZE = 180 -- interior footprint of the abandoned facility
-local GEN_CIRCLE_RADIUS = 60
-local WALL_HEIGHT = 24
-local FLOOR_TOP = 1
+local ARENA_SIZE = 250 -- outdoor site footprint
+local FLOOR_TOP = 1 -- terrain surface height
 
 -- ===================== REMOTES =====================
 local remotes = Instance.new("Folder")
@@ -160,180 +169,532 @@ local function part(props: { [string]: any }): Part
 	for k, v in props do
 		(p :: any)[k] = v
 	end
-	p.Parent = arena
+	p.Parent = props.Parent or arena
 	return p
 end
 
--- ABANDONED FACILITY INTERIOR. One coherent industrial space: a solid
--- concrete slab, rusted panel walls with concrete pillars, a girder
--- ceiling with collapsed panels, and fixed rooms and corridors. A single
--- consistent palette (concrete grey / rust / dim hazard tones) is what
--- keeps it from reading as loose Roblox parts.
+-- ===================== MAP BUILD (staged) =====================
+-- One large outdoor industrial site, built in stages, each into its own
+-- Workspace folder: Terrain -> Forest -> Buildings -> Props (generators
+-- and clutter have their own sections below; spawns live in the hall).
+-- Design rules: players never see the whole map, every objective has
+-- multiple approaches, landmarks (water tower, chimneys) mark the way.
 
--- Solid slab: a real Part, so nothing can ever fall through the floor.
-part({ Name = "Floor", Size = Vector3.new(ARENA_SIZE + 4, 2, ARENA_SIZE + 4), Position = Vector3.new(0, 0, 0),
-	Color = Color3.fromRGB(92, 92, 94), Material = Enum.Material.Concrete })
-
--- Oil stains and grime patches break up the clean slab.
-do
-	local rng = Random.new(3)
-	for _ = 1, 24 do
-		part({ Name = "FloorStain", CanCollide = false, Material = Enum.Material.Asphalt,
-			Size = Vector3.new(rng:NextNumber(5, 16), 0.05, rng:NextNumber(5, 16)),
-			Position = Vector3.new(rng:NextNumber(-80, 80), FLOOR_TOP + rng:NextNumber(0.01, 0.04), rng:NextNumber(-80, 80)),
-			Color = Color3.fromRGB(40 + rng:NextInteger(0, 12), 40, 38) })
-	end
+local function mapFolder(name: string): Folder
+	local f = Instance.new("Folder")
+	f.Name = name
+	f.Parent = arena
+	return f
 end
 
--- Perimeter: rusted panel walls braced by concrete pillars.
-for _, w in {
-	{ Vector3.new(ARENA_SIZE + 4, WALL_HEIGHT, 2), Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, ARENA_SIZE / 2) },
-	{ Vector3.new(ARENA_SIZE + 4, WALL_HEIGHT, 2), Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, -ARENA_SIZE / 2) },
-	{ Vector3.new(2, WALL_HEIGHT, ARENA_SIZE + 4), Vector3.new(ARENA_SIZE / 2, WALL_HEIGHT / 2 + FLOOR_TOP, 0) },
-	{ Vector3.new(2, WALL_HEIGHT, ARENA_SIZE + 4), Vector3.new(-ARENA_SIZE / 2, WALL_HEIGHT / 2 + FLOOR_TOP, 0) },
-} do
-	part({ Name = "Wall", Size = w[1], Position = w[2], Color = Color3.fromRGB(64, 58, 52), Material = Enum.Material.CorrodedMetal })
-end
-for i = -2, 2 do
-	local offset = ARENA_SIZE / 2 - 2
-	for _, pos in {
-		Vector3.new(i * 36, 0, offset), Vector3.new(i * 36, 0, -offset),
-		Vector3.new(offset, 0, i * 36), Vector3.new(-offset, 0, i * 36),
-	} do
-		part({ Name = "Pillar", Size = Vector3.new(3, WALL_HEIGHT, 3),
-			Position = pos + Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, 0),
-			Color = Color3.fromRGB(96, 96, 98), Material = Enum.Material.Concrete })
-	end
-end
+local forestFolder = mapFolder("Forest")
+local buildingsFolder = mapFolder("Buildings")
+local propsFolder = mapFolder("Props")
+local rocksFolder = mapFolder("Rocks")
+local spawnsFolder = mapFolder("SpawnLocations")
 
--- Free-standing support columns through the open floor.
-local COLUMN_POSITIONS = {
-	Vector3.new(45, 0, 0), Vector3.new(-45, 0, 0), Vector3.new(0, 0, 45), Vector3.new(0, 0, -45),
-	Vector3.new(45, 0, 45), Vector3.new(45, 0, -45), Vector3.new(-45, 0, 45), Vector3.new(-45, 0, -45),
+-- Rectangles scenery must stay out of: { centerX, centerZ, halfW, halfD }
+local KEEP_CLEAR: { { number } } = {
+	{ 0, 0, 26, 21 }, -- Discussion Hall
+	{ 65, 25, 20, 16 }, -- Factory
+	{ 55, -50, 16, 13 }, -- Barn
+	{ -65, -55, 20, 15 }, -- Warehouse
+	{ -70, 20, 17, 13 }, -- Junkyard
+	{ -25, 75, 9, 8 }, { 90, -15, 9, 8 }, -- Cabins
+	{ 0, 100, 11, 11 }, -- Water tower
+	{ 55, -95, 18, 14 }, -- Swamp pond
 }
-for _, pos in COLUMN_POSITIONS do
-	part({ Name = "Column", Size = Vector3.new(3, WALL_HEIGHT, 3),
-		Position = pos + Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, 0),
-		Color = Color3.fromRGB(96, 96, 98), Material = Enum.Material.Concrete })
+
+local function insideKeepClear(pos: Vector3): boolean
+	for _, r in KEEP_CLEAR do
+		if math.abs(pos.X - r[1]) < r[3] and math.abs(pos.Z - r[2]) < r[4] then
+			return true
+		end
+	end
+	return false
 end
 
--- Roof: steel girders and a slab ceiling with collapsed panels, so the
--- night sky (and shafts of moonlight) leak into an otherwise sealed hall.
-for i = -2, 2 do
-	part({ Name = "Girder", Size = Vector3.new(ARENA_SIZE, 1.5, 1.5),
-		Position = Vector3.new(0, FLOOR_TOP + WALL_HEIGHT - 0.75, i * 36),
-		Color = Color3.fromRGB(52, 48, 46), Material = Enum.Material.Metal })
+local function nearGenerator(pos: Vector3, dist: number): boolean
+	for _, g in GEN_POSITIONS do
+		if (pos - g).Magnitude < dist then
+			return true
+		end
+	end
+	return false
 end
+
+local function scenerySpotFree(pos: Vector3): boolean
+	if pos.Magnitude < SAFE_ZONE_RADIUS + 6 then
+		return false
+	end
+	if insideKeepClear(pos) then
+		return false
+	end
+	if nearGenerator(pos, 9) then
+		return false
+	end
+	if math.abs(pos.X) < 7 and pos.Z < -17 then
+		return false -- exit road
+	end
+	return true
+end
+
+-- ---- Stage 1: terrain (ground, hills, swamp, dirt roads) ----
+print("[NightShift] map: terrain…")
+-- Safety net: invisible slab just under the terrain surface, so a
+-- terrain failure can never drop players into the void.
+part({ Name = "SafetyFloor", Size = Vector3.new(ARENA_SIZE + 20, 2, ARENA_SIZE + 20),
+	Position = Vector3.new(0, -0.2, 0), Transparency = 1 })
+
+local terrain = Workspace.Terrain
+local function roadStrip(a: Vector3, b: Vector3)
+	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	if delta.Magnitude < 1 then
+		return
+	end
+	local mid = (a + b) / 2
+	local yaw = math.atan2(delta.X, delta.Z)
+	terrain:FillBlock(CFrame.new(mid.X, 0.7, mid.Z) * CFrame.Angles(0, yaw, 0),
+		Vector3.new(7, 2.2, delta.Magnitude + 6), Enum.Material.Mud)
+end
+
+pcall(function()
+	terrain:FillBlock(CFrame.new(0, -2, 0), Vector3.new(ARENA_SIZE + 30, 6, ARENA_SIZE + 30), Enum.Material.Ground)
+	local rng = Random.new(7)
+	-- Overgrown grass patches.
+	for _ = 1, 110 do
+		terrain:FillBlock(CFrame.new(rng:NextNumber(-118, 118), -0.9, rng:NextNumber(-118, 118))
+			* CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
+			Vector3.new(rng:NextNumber(10, 28), 4, rng:NextNumber(10, 28)), Enum.Material.Grass)
+	end
+	-- Gentle hills: mostly-buried spheres read as mounds, not walls.
+	for _, h in {
+		{ -100, -100, 26 }, { 105, -65, 20 }, { -105, 65, 22 }, { 100, 100, 26 },
+		{ -60, 105, 18 }, { 60, -110, 18 }, { -110, -40, 16 },
+	} do
+		terrain:FillBall(Vector3.new(h[1], 1 - h[3] * 0.72, h[2]), h[3], Enum.Material.Ground)
+	end
+	-- Swamp in the SE: shallow water over mud.
+	terrain:FillBlock(CFrame.new(55, -0.4, -95), Vector3.new(34, 3, 26), Enum.Material.Mud)
+	terrain:FillBlock(CFrame.new(55, 0.7, -95), Vector3.new(26, 0.9, 18), Enum.Material.Water)
+	-- Dirt roads: a bent spoke from the hall to every generator, a ring
+	-- around the outside (several looping paths), and the exit road.
+	local HUB = Vector3.new(0, 0, 0)
+	for _, g in GEN_POSITIONS do
+		local delta = g - HUB
+		local perp = Vector3.new(-delta.Z, 0, delta.X).Unit
+		local mid = HUB + delta * 0.5 + perp * rng:NextNumber(-16, 16)
+		roadStrip(HUB, mid)
+		roadStrip(mid, g)
+	end
+	for _, seg in {
+		{ GEN_POSITIONS[1], GEN_POSITIONS[6] }, { GEN_POSITIONS[6], GEN_POSITIONS[5] },
+		{ GEN_POSITIONS[5], GEN_POSITIONS[4] }, { GEN_POSITIONS[4], GEN_POSITIONS[3] },
+		{ GEN_POSITIONS[3], GEN_POSITIONS[2] }, { GEN_POSITIONS[2], Vector3.new(0, 0, 92) },
+		{ Vector3.new(0, 0, 92), GEN_POSITIONS[1] },
+	} do
+		roadStrip(seg[1], seg[2])
+	end
+	roadStrip(Vector3.new(0, 0, -17), Vector3.new(0, 0, -122)) -- exit road
+end)
+
+-- ---- Stage 2: forest ----
+print("[NightShift] map: forest…")
+local function makePine(rng: Random, pos: Vector3)
+	local height = rng:NextNumber(14, 24)
+	part({ Parent = forestFolder, Name = "PineTrunk",
+		Size = Vector3.new(1.3, height * 0.5, 1.3),
+		Position = pos + Vector3.new(0, height * 0.25, 0),
+		Color = Color3.fromRGB(58, 44, 32), Material = Enum.Material.Wood })
+	local width = height * 0.52
+	local y = height * 0.42
+	for _ = 1, 3 do
+		part({ Parent = forestFolder, Name = "PineFoliage", Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(height * 0.24, width, width),
+			CFrame = CFrame.new(pos + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+			Color = Color3.fromRGB(28 + rng:NextInteger(0, 8), 46 + rng:NextInteger(0, 8), 32),
+			Material = Enum.Material.Grass, CanCollide = false })
+		width *= 0.7
+		y += height * 0.2
+	end
+end
+
 do
-	local rng = Random.new(5)
-	local panel = ARENA_SIZE / 6
-	for gx = 0, 5 do
-		for gz = 0, 5 do
-			if rng:NextNumber() > 0.16 then -- some panels have collapsed
-				part({ Name = "Ceiling", Size = Vector3.new(panel, 1, panel),
-					Position = Vector3.new(-ARENA_SIZE / 2 + panel * (gx + 0.5), FLOOR_TOP + WALL_HEIGHT + 0.5, -ARENA_SIZE / 2 + panel * (gz + 0.5)),
-					Color = Color3.fromRGB(46, 48, 52), Material = Enum.Material.Slate })
+	local rng = Random.new(21)
+	-- Dense tree wall around the whole site.
+	for _ = 1, 170 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local radius = rng:NextNumber(100, 116)
+		local pos = Vector3.new(math.cos(angle) * radius, FLOOR_TOP, math.sin(angle) * radius)
+		if scenerySpotFree(pos) then
+			makePine(rng, pos)
+		end
+	end
+	-- Forest pockets between locations, per the map sketch.
+	for _, pocket in {
+		{ -70, 72, 18, 12 }, { 70, 72, 18, 12 }, { -90, -70, 16, 10 },
+		{ 0, -75, 14, 8 }, { 35, 5, 12, 6 }, { -35, -20, 12, 6 },
+	} do
+		for _ = 1, pocket[4] do
+			local pos = Vector3.new(pocket[1] + rng:NextNumber(-pocket[3], pocket[3]), FLOOR_TOP,
+				pocket[2] + rng:NextNumber(-pocket[3], pocket[3]))
+			if scenerySpotFree(pos) then
+				makePine(rng, pos)
 			end
 		end
 	end
 end
 
--- REAL ROOMS, NOT AN OPEN PEN. Full-height walls along x = ±30 and
--- z = ±30 divide the hall into a 3x3 grid: the safe hub in the middle,
--- eight rooms around it, connected only through doorways (with lintels).
--- You can never see across the map — every room is its own dark box.
-local INTERIOR_WALL_T = 1.5
-local DOOR_WIDTH = 8
-local DOOR_HEIGHT = 9
-local DOOR_POSITIONS: { Vector3 } = {} -- so clutter never blocks a doorway
+-- ---- Stage 3: buildings ----
+print("[NightShift] map: buildings…")
+local WALL_T = 1.2
 
-local function wallRun(alongZ: boolean, at: number, doorCenters: { number })
-	local function seg(a: number, b: number, yBottom: number, yTop: number)
-		if b - a < 0.5 then
-			return
-		end
-		local mid = (a + b) / 2
-		local h = yTop - yBottom
-		local size, position
-		if alongZ then
-			size = Vector3.new(INTERIOR_WALL_T, h, b - a)
-			position = Vector3.new(at, yBottom + h / 2, mid)
+local function wallSeg(folder: Folder, a: Vector3, b: Vector3, yBottom: number, yTop: number,
+	mat: Enum.Material, color: Color3)
+	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	local len = delta.Magnitude
+	if len < 0.4 or yTop - yBottom < 0.4 then
+		return
+	end
+	local mid = (a + b) / 2
+	local yaw = math.atan2(delta.X, delta.Z)
+	part({ Parent = folder, Name = "Wall", Size = Vector3.new(WALL_T, yTop - yBottom, len),
+		CFrame = CFrame.new(mid.X, (yBottom + yTop) / 2, mid.Z) * CFrame.Angles(0, yaw, 0),
+		Material = mat, Color = color })
+end
+
+-- A weathered building shell: concrete pad, four walls with door gaps
+-- (and lintels), flat roof with one collapsed panel.
+local function buildingShell(name: string, center: Vector3, w: number, d: number, h: number,
+	doors: { [string]: boolean }, mat: Enum.Material, color: Color3)
+	local f = Instance.new("Folder")
+	f.Name = name
+	f.Parent = buildingsFolder
+	part({ Parent = f, Name = "Pad", Size = Vector3.new(w + 2, 0.4, d + 2),
+		Position = Vector3.new(center.X, FLOOR_TOP + 0.2, center.Z),
+		Color = Color3.fromRGB(88, 88, 90), Material = Enum.Material.Concrete })
+	local x0, x1 = center.X - w / 2, center.X + w / 2
+	local z0, z1 = center.Z - d / 2, center.Z + d / 2
+	local base, top = FLOOR_TOP, FLOOR_TOP + h
+	local DOOR_W, DOOR_H = 8, 8
+	for side, ab in {
+		N = { Vector3.new(x0, 0, z1), Vector3.new(x1, 0, z1) },
+		S = { Vector3.new(x0, 0, z0), Vector3.new(x1, 0, z0) },
+		W = { Vector3.new(x0, 0, z0), Vector3.new(x0, 0, z1) },
+		E = { Vector3.new(x1, 0, z0), Vector3.new(x1, 0, z1) },
+	} do
+		local a, b = ab[1], ab[2]
+		if doors[side] then
+			local mid = (a + b) / 2
+			local dir = (b - a).Unit
+			wallSeg(f, a, mid - dir * (DOOR_W / 2), base, top, mat, color)
+			wallSeg(f, mid + dir * (DOOR_W / 2), b, base, top, mat, color)
+			wallSeg(f, mid - dir * (DOOR_W / 2), mid + dir * (DOOR_W / 2), base + DOOR_H, top, mat, color)
 		else
-			size = Vector3.new(b - a, h, INTERIOR_WALL_T)
-			position = Vector3.new(mid, yBottom + h / 2, at)
+			wallSeg(f, a, b, base, top, mat, color)
 		end
-		part({ Name = "InteriorWall", Size = size, Position = position,
-			Color = Color3.fromRGB(72, 68, 64), Material = Enum.Material.Brick })
 	end
-	table.sort(doorCenters)
-	local cursor = -ARENA_SIZE / 2
-	for _, c in doorCenters do
-		seg(cursor, c - DOOR_WIDTH / 2, FLOOR_TOP, FLOOR_TOP + WALL_HEIGHT)
-		-- Lintel over the doorway, so it reads as a door, not a slot.
-		seg(c - DOOR_WIDTH / 2, c + DOOR_WIDTH / 2, FLOOR_TOP + DOOR_HEIGHT, FLOOR_TOP + WALL_HEIGHT)
-		table.insert(DOOR_POSITIONS, alongZ and Vector3.new(at, 0, c) or Vector3.new(c, 0, at))
-		cursor = c + DOOR_WIDTH / 2
+	local rng = Random.new(math.floor(center.X * 31 + center.Z * 7))
+	local skip = rng:NextInteger(1, 4)
+	local n = 0
+	for gx = 0, 1 do
+		for gz = 0, 1 do
+			n += 1
+			if n ~= skip then
+				part({ Parent = f, Name = "Roof", Size = Vector3.new(w / 2 + 1, 0.8, d / 2 + 1),
+					Position = Vector3.new(center.X - w / 4 + gx * (w / 2), top + 0.4, center.Z - d / 4 + gz * (d / 2)),
+					Color = Color3.fromRGB(52, 50, 48), Material = Enum.Material.Metal })
+			end
+		end
 	end
-	seg(cursor, ARENA_SIZE / 2, FLOOR_TOP, FLOOR_TOP + WALL_HEIGHT)
 end
 
-wallRun(true, -30, { -60, 0, 60 })
-wallRun(true, 30, { -60, 0, 60 })
-wallRun(false, -30, { -60, 0, 60 })
-wallRun(false, 30, { -60, 0, 60 })
+buildingShell("Factory", Vector3.new(65, 0, 25), 34, 26, 13, { W = true, S = true },
+	Enum.Material.CorrodedMetal, Color3.fromRGB(70, 60, 52))
+part({ Parent = buildingsFolder, Name = "FactoryChimney", Size = Vector3.new(4, 24, 4),
+	Position = Vector3.new(78, FLOOR_TOP + 12, 34), Color = Color3.fromRGB(70, 62, 58), Material = Enum.Material.Brick })
+buildingShell("Barn", Vector3.new(55, 0, -50), 26, 19, 11, { N = true, W = true },
+	Enum.Material.WoodPlanks, Color3.fromRGB(88, 46, 38))
+buildingShell("Warehouse", Vector3.new(-65, 0, -55), 34, 24, 12, { E = true, N = true },
+	Enum.Material.Metal, Color3.fromRGB(64, 70, 76))
+buildingShell("Cabin1", Vector3.new(-25, 0, 75), 13, 11, 7, { S = true },
+	Enum.Material.Wood, Color3.fromRGB(66, 50, 38))
+buildingShell("Cabin2", Vector3.new(90, 0, -15), 13, 11, 7, { W = true },
+	Enum.Material.Wood, Color3.fromRGB(66, 50, 38))
 
--- Low cover walls inside the corner rooms.
-for i, spec in {
-	{ Vector3.new(16, 9, 1.5), Vector3.new(-58, 0, -52) }, { Vector3.new(1.5, 9, 16), Vector3.new(-52, 0, 58) },
-	{ Vector3.new(16, 9, 1.5), Vector3.new(56, 0, 50) }, { Vector3.new(1.5, 9, 16), Vector3.new(58, 0, -50) },
-} do
-	part({ Name = "CoverWall" .. i, Size = spec[1], Position = spec[2] + Vector3.new(0, 4.5 + FLOOR_TOP, 0),
-		Color = Color3.fromRGB(70, 66, 62), Material = Enum.Material.Brick })
+-- Water tower: the landmark you navigate by.
+do
+	local wt = Instance.new("Folder")
+	wt.Name = "WaterTower"
+	wt.Parent = buildingsFolder
+	for _, leg in { Vector3.new(-4, 0, 96), Vector3.new(4, 0, 96), Vector3.new(-4, 0, 104), Vector3.new(4, 0, 104) } do
+		part({ Parent = wt, Name = "TowerLeg", Size = Vector3.new(1.2, 26, 1.2),
+			Position = leg + Vector3.new(0, FLOOR_TOP + 13, 0),
+			Color = Color3.fromRGB(72, 60, 50), Material = Enum.Material.CorrodedMetal })
+	end
+	part({ Parent = wt, Name = "Tank", Shape = Enum.PartType.Cylinder, Size = Vector3.new(10, 13, 13),
+		CFrame = CFrame.new(0, FLOOR_TOP + 31, 100) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(80, 58, 46), Material = Enum.Material.CorrodedMetal })
 end
 
--- Conduit pipe runs along the perimeter walls.
-for _, spec in {
-	{ Vector3.new(ARENA_SIZE - 8, 1.1, 1.1), Vector3.new(0, 5, ARENA_SIZE / 2 - 2.2) },
-	{ Vector3.new(ARENA_SIZE - 8, 1.1, 1.1), Vector3.new(0, 7.4, ARENA_SIZE / 2 - 2.2) },
-	{ Vector3.new(ARENA_SIZE - 8, 1.1, 1.1), Vector3.new(0, 5, -(ARENA_SIZE / 2 - 2.2)) },
-	{ Vector3.new(1.1, 1.1, ARENA_SIZE - 8), Vector3.new(ARENA_SIZE / 2 - 2.2, 5, 0) },
-	{ Vector3.new(1.1, 1.1, ARENA_SIZE - 8), Vector3.new(-(ARENA_SIZE / 2 - 2.2), 5, 0) },
-	{ Vector3.new(1.1, 1.1, ARENA_SIZE - 8), Vector3.new(-(ARENA_SIZE / 2 - 2.2), 7.4, 0) },
-} do
-	part({ Name = "Pipe", Size = spec[1], Position = spec[2], Color = Color3.fromRGB(80, 74, 60), Material = Enum.Material.Metal })
+-- The Discussion Hall: abandoned lodge meets industrial control room.
+-- The safest place on the map — the crew votes here each dawn.
+local hall = Instance.new("Folder")
+hall.Name = "DiscussionHall"
+hall.Parent = buildingsFolder
+do
+	local W, D, H = 44, 34, 11
+	local x0, x1, z0, z1 = -W / 2, W / 2, -D / 2, D / 2
+	local base, top = FLOOR_TOP, FLOOR_TOP + H
+	local mat, color = Enum.Material.WoodPlanks, Color3.fromRGB(74, 58, 44)
+	part({ Parent = hall, Name = "Pad", Size = Vector3.new(W + 2, 0.4, D + 2),
+		Position = Vector3.new(0, FLOOR_TOP + 0.2, 0),
+		Color = Color3.fromRGB(96, 84, 70), Material = Enum.Material.WoodPlanks })
+	-- South wall: main exit, out to the exit road.
+	do
+		local a, b = Vector3.new(x0, 0, z0), Vector3.new(x1, 0, z0)
+		local mid = (a + b) / 2
+		local dir = (b - a).Unit
+		wallSeg(hall, a, mid - dir * 5, base, top, mat, color)
+		wallSeg(hall, mid + dir * 5, b, base, top, mat, color)
+		wallSeg(hall, mid - dir * 5, mid + dir * 5, base + 8, top, mat, color)
+	end
+	-- East wall: side door.
+	do
+		local a, b = Vector3.new(x1, 0, z0), Vector3.new(x1, 0, z1)
+		local mid = (a + b) / 2
+		local dir = (b - a).Unit
+		wallSeg(hall, a, mid - dir * 4, base, top, mat, color)
+		wallSeg(hall, mid + dir * 4, b, base, top, mat, color)
+		wallSeg(hall, mid - dir * 4, mid + dir * 4, base + 8, top, mat, color)
+	end
+	-- North wall: large windows.
+	do
+		local a, b = Vector3.new(x0, 0, z1), Vector3.new(x1, 0, z1)
+		wallSeg(hall, a, b, base, base + 3.5, mat, color)
+		wallSeg(hall, a, b, base + 7, top, mat, color)
+		part({ Parent = hall, Name = "Windows", Size = Vector3.new(W - 4, 3.5, 0.4),
+			Position = Vector3.new(0, base + 5.25, z1), Transparency = 0.55,
+			Color = Color3.fromRGB(150, 170, 175), Material = Enum.Material.Glass })
+		for _, mx in { -11, 0, 11 } do
+			part({ Parent = hall, Name = "WindowMullion", Size = Vector3.new(0.7, 3.5, 0.7),
+				Position = Vector3.new(mx, base + 5.25, z1), Color = color, Material = mat })
+		end
+	end
+	-- West wall: solid, with the fireplace and chimney.
+	wallSeg(hall, Vector3.new(x0, 0, z0), Vector3.new(x0, 0, z1), base, top, mat, color)
+	part({ Parent = hall, Name = "Fireplace", Size = Vector3.new(1.8, 6, 5),
+		Position = Vector3.new(x0 + 1.2, base + 3, 6), Color = Color3.fromRGB(78, 68, 62), Material = Enum.Material.Brick })
+	local hearth = part({ Parent = hall, Name = "Hearth", Size = Vector3.new(0.6, 2.6, 2.6),
+		Position = Vector3.new(x0 + 2.2, base + 1.4, 6), Color = Color3.fromRGB(16, 12, 10), Material = Enum.Material.Slate })
+	local fireLight = Instance.new("PointLight")
+	fireLight.Range = 16
+	fireLight.Brightness = 1.6
+	fireLight.Color = Color3.fromRGB(255, 140, 50)
+	fireLight.Shadows = true
+	fireLight.Parent = hearth
+	pcall(function()
+		local fire = Instance.new("ParticleEmitter")
+		fire.Texture = "rbxasset://textures/particles/fire_main.dds"
+		fire.Size = NumberSequence.new(1.4, 0.4)
+		fire.Color = ColorSequence.new(Color3.fromRGB(255, 150, 60), Color3.fromRGB(180, 60, 20))
+		fire.Lifetime = NumberRange.new(0.5, 1.1)
+		fire.Rate = 14
+		fire.Speed = NumberRange.new(1.5, 3)
+		fire.LightEmission = 1
+		fire.Parent = hearth
+	end)
+	part({ Parent = hall, Name = "HallChimney", Size = Vector3.new(3.5, H + 8, 3.5),
+		Position = Vector3.new(x0 - 1, base + (H + 8) / 2, 6), Color = Color3.fromRGB(78, 68, 62), Material = Enum.Material.Brick })
+	-- Pitched roof: two tilted slabs and a ridge beam.
+	part({ Parent = hall, Name = "RoofSlabN", Size = Vector3.new(W + 3, 0.8, D / 2 + 3),
+		CFrame = CFrame.new(0, top + 2, D / 4) * CFrame.Angles(math.rad(-16), 0, 0),
+		Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Slate })
+	part({ Parent = hall, Name = "RoofSlabS", Size = Vector3.new(W + 3, 0.8, D / 2 + 3),
+		CFrame = CFrame.new(0, top + 2, -D / 4) * CFrame.Angles(math.rad(16), 0, 0),
+		Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Slate })
+	-- Long wooden table, benches, and the voting terminal.
+	part({ Parent = hall, Name = "TableTop", Size = Vector3.new(16, 0.8, 5),
+		Position = Vector3.new(0, base + 2.9, 3), Color = Color3.fromRGB(104, 82, 58), Material = Enum.Material.WoodPlanks })
+	for _, tx in { -6.5, 6.5 } do
+		part({ Parent = hall, Name = "TableLeg", Size = Vector3.new(1.2, 2.5, 4.4),
+			Position = Vector3.new(tx, base + 1.25, 3), Color = Color3.fromRGB(84, 66, 48), Material = Enum.Material.Wood })
+	end
+	for _, bz in { -1.2, 7.2 } do
+		part({ Parent = hall, Name = "Bench", Size = Vector3.new(14, 0.5, 1.6),
+			Position = Vector3.new(0, base + 1.5, bz), Color = Color3.fromRGB(92, 72, 52), Material = Enum.Material.WoodPlanks })
+	end
+	part({ Parent = hall, Name = "VotingTerminal", Size = Vector3.new(3, 3.4, 1.6),
+		Position = Vector3.new(0, base + 1.7, -11), Color = Color3.fromRGB(60, 64, 66), Material = Enum.Material.DiamondPlate })
+	local screen = part({ Parent = hall, Name = "TerminalScreen", Size = Vector3.new(3.4, 2.2, 0.4),
+		CFrame = CFrame.new(0, base + 4.2, -10.8) * CFrame.Angles(math.rad(-12), 0, 0),
+		Color = Color3.fromRGB(70, 220, 190), Material = Enum.Material.Neon })
+	local screenLight = Instance.new("PointLight")
+	screenLight.Range = 10
+	screenLight.Brightness = 0.8
+	screenLight.Color = Color3.fromRGB(90, 220, 190)
+	screenLight.Parent = screen
+	-- Spawn points around the table.
+	for _, sp in {
+		Vector3.new(-6, 0, 8.6), Vector3.new(0, 0, 8.6), Vector3.new(6, 0, 8.6),
+		Vector3.new(-6, 0, -3), Vector3.new(6, 0, -3), Vector3.new(12, 0, 3),
+		Vector3.new(-12, 0, 3), Vector3.new(0, 0, -6.5),
+	} do
+		local s = Instance.new("SpawnLocation")
+		s.Size = Vector3.new(4, 1, 4)
+		s.Position = sp + Vector3.new(0, FLOOR_TOP + 0.6, 0)
+		s.Anchored = true
+		s.Transparency = 1
+		s.CanCollide = false
+		s.Neutral = true
+		s.Parent = spawnsFolder
+	end
 end
 
--- Hanging fluorescent fixtures (the "day shift" lights) and red
--- emergency lamps on the columns (night). setDay/setNight toggle them.
+-- ---- Stage 4: props (fences, wrecks, machinery, rocks, lights) ----
+print("[NightShift] map: props…")
+-- Rusted perimeter fence, slightly ragged.
+do
+	local rng = Random.new(13)
+	local B = 120
+	local step = 12
+	for i = -B, B - step, step do
+		for _, spec in {
+			{ Vector3.new(i + step / 2, 0, -B), 0 }, { Vector3.new(i + step / 2, 0, B), 0 },
+			{ Vector3.new(-B, 0, i + step / 2), 90 }, { Vector3.new(B, 0, i + step / 2), 90 },
+		} do
+			part({ Parent = propsFolder, Name = "PerimeterFence", Size = Vector3.new(step + 0.4, 9, 0.6),
+				CFrame = CFrame.new(spec[1] + Vector3.new(0, FLOOR_TOP + 4.5, 0))
+					* CFrame.Angles(0, math.rad(spec[2] + rng:NextNumber(-2.5, 2.5)), 0),
+				Color = Color3.fromRGB(58, 52, 46), Material = Enum.Material.CorrodedMetal })
+		end
+	end
+end
+
+-- Chain-link fence runs (with fallen panels) around the work yards.
+local function chainFenceRun(from: Vector3, to: Vector3)
+	local delta = Vector3.new(to.X - from.X, 0, to.Z - from.Z)
+	local dir = delta.Unit
+	local yaw = math.atan2(dir.X, dir.Z)
+	for s = 0, math.floor(delta.Magnitude / 6) - 1 do
+		local a = from + dir * (s * 6)
+		part({ Parent = propsFolder, Name = "FencePost", Size = Vector3.new(0.5, 5.4, 0.5),
+			Position = a + Vector3.new(0, FLOOR_TOP + 2.7, 0), Color = Color3.fromRGB(90, 90, 92), Material = Enum.Material.Metal })
+		if s % 5 ~= 4 then -- every fifth panel has fallen over
+			part({ Parent = propsFolder, Name = "ChainFence", Size = Vector3.new(0.2, 5, 6),
+				CFrame = CFrame.new(a + dir * 3 + Vector3.new(0, FLOOR_TOP + 2.5, 0)) * CFrame.Angles(0, yaw, 0),
+				Transparency = 0.45, Color = Color3.fromRGB(150, 150, 150), Material = Enum.Material.Metal })
+		end
+	end
+end
+chainFenceRun(Vector3.new(-88, 0, 6), Vector3.new(-52, 0, 6))
+chainFenceRun(Vector3.new(-88, 0, 34), Vector3.new(-88, 0, 6))
+chainFenceRun(Vector3.new(-45, 0, -40), Vector3.new(-45, 0, -70))
+chainFenceRun(Vector3.new(35, 0, 40), Vector3.new(46, 0, 40))
+
+-- Abandoned trucks.
+local function makeTruck(pos: Vector3, yawDeg: number)
+	local base = CFrame.new(pos + Vector3.new(0, FLOOR_TOP, 0)) * CFrame.Angles(0, math.rad(yawDeg), 0)
+	part({ Parent = propsFolder, Name = "TruckBed", Size = Vector3.new(11, 4.2, 5),
+		CFrame = base * CFrame.new(-1.5, 2.6, 0), Color = Color3.fromRGB(70, 52, 44), Material = Enum.Material.CorrodedMetal })
+	part({ Parent = propsFolder, Name = "TruckCab", Size = Vector3.new(4.4, 3.6, 4.6),
+		CFrame = base * CFrame.new(6, 2.3, 0), Color = Color3.fromRGB(84, 60, 48), Material = Enum.Material.CorrodedMetal })
+	for _, wz in { 2.4, -2.4 } do
+		part({ Parent = propsFolder, Name = "TruckWheels", Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(10, 1.6, 1.6), CFrame = base * CFrame.new(-1, 0.8, wz),
+			Color = Color3.fromRGB(28, 28, 28), Material = Enum.Material.SmoothPlastic })
+	end
+end
+makeTruck(Vector3.new(-74, 0, 24), 40)
+makeTruck(Vector3.new(-64, 0, 14), -25)
+makeTruck(Vector3.new(30, 0, 80), 100)
+
+-- Junkyard scrap heaps.
+do
+	local rng = Random.new(17)
+	for _ = 1, 8 do
+		local s = rng:NextNumber(2, 5)
+		part({ Parent = propsFolder, Name = "Scrap", Size = Vector3.new(s * rng:NextNumber(0.7, 1.4), s, s),
+			CFrame = CFrame.new(-70 + rng:NextNumber(-12, 12), FLOOR_TOP + s * 0.35, 20 + rng:NextNumber(-9, 9))
+				* CFrame.Angles(math.rad(rng:NextNumber(-25, 25)), math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(-25, 25))),
+			Color = Color3.fromRGB(64 + rng:NextInteger(0, 24), 48, 38), Material = Enum.Material.CorrodedMetal })
+	end
+end
+
+-- Broken machinery: rusted tanks and pipes by the factory and warehouse.
+local function machinery(pos: Vector3, yawDeg: number)
+	local base = CFrame.new(pos + Vector3.new(0, FLOOR_TOP, 0)) * CFrame.Angles(0, math.rad(yawDeg), 0)
+	part({ Parent = propsFolder, Name = "MachineTank", Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(12, 6, 6), CFrame = base * CFrame.new(0, 3, 0),
+		Color = Color3.fromRGB(88, 66, 50), Material = Enum.Material.CorrodedMetal })
+	for _, py in { 1.4, 2.6 } do
+		part({ Parent = propsFolder, Name = "MachinePipe", Size = Vector3.new(9, 0.9, 0.9),
+			CFrame = base * CFrame.new(2, py, 4), Color = Color3.fromRGB(70, 64, 56), Material = Enum.Material.Metal })
+	end
+end
+machinery(Vector3.new(50, 0, 40), 20)
+machinery(Vector3.new(-46, 0, -46), -60)
+
+-- Shipping containers: cover near every generator.
+do
+	local rng = Random.new(29)
+	local palette = { Color3.fromRGB(96, 44, 38), Color3.fromRGB(52, 60, 70), Color3.fromRGB(70, 72, 52) }
+	for _, g in GEN_POSITIONS do
+		for _ = 1, 2 do
+			local angle = rng:NextNumber(0, math.pi * 2)
+			local pos = g + Vector3.new(math.cos(angle), 0, math.sin(angle)) * rng:NextNumber(10, 15)
+			if not insideKeepClear(pos) and math.abs(pos.X) < 114 and math.abs(pos.Z) < 114 then
+				part({ Parent = propsFolder, Name = "Container", Size = Vector3.new(14, 8, 7),
+					CFrame = CFrame.new(pos + Vector3.new(0, FLOOR_TOP + 4, 0))
+						* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0),
+					Color = palette[rng:NextInteger(1, #palette)], Material = Enum.Material.CorrodedMetal })
+			end
+		end
+	end
+end
+
+-- Rocks.
+do
+	local rng = Random.new(31)
+	for _ = 1, 40 do
+		local pos = Vector3.new(rng:NextNumber(-114, 114), 0, rng:NextNumber(-114, 114))
+		if scenerySpotFree(pos) then
+			local s = rng:NextNumber(2.5, 7)
+			part({ Parent = rocksFolder, Name = "Boulder",
+				Size = Vector3.new(s * rng:NextNumber(0.8, 1.4), s, s * rng:NextNumber(0.8, 1.4)),
+				CFrame = CFrame.new(pos + Vector3.new(0, FLOOR_TOP + s * 0.25, 0))
+					* CFrame.Angles(math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360))),
+				Color = Color3.fromRGB(72, 74, 70), Material = Enum.Material.Rock })
+		end
+	end
+end
+
+-- Floodlights (on during the day shift) and red beacons (night).
 local facilityFixtures: { { fixture: Part, light: PointLight } } = {}
 local emergencyFixtures: { { fixture: Part, light: PointLight } } = {}
 for _, pos in {
-	Vector3.new(45, 0, 0), Vector3.new(-45, 0, 0), Vector3.new(0, 0, 45), Vector3.new(0, 0, -45),
-	Vector3.new(45, 0, 45), Vector3.new(45, 0, -45), Vector3.new(-45, 0, 45), Vector3.new(-45, 0, -45),
-	Vector3.new(0, 0, 72), Vector3.new(0, 0, -72), Vector3.new(72, 0, 0), Vector3.new(-72, 0, 0),
+	Vector3.new(5, 0, -21), Vector3.new(48, 0, 25), Vector3.new(-46, 0, -52),
+	Vector3.new(-70, 0, 4), Vector3.new(42, 0, -44), Vector3.new(8, 0, 92),
 } do
-	local fixtureY = FLOOR_TOP + 15
-	part({ Name = "LightRod", Size = Vector3.new(0.2, WALL_HEIGHT - 15 + 0.5, 0.2),
-		Position = pos + Vector3.new(0, fixtureY + (WALL_HEIGHT - 15 + 0.5) / 2, 0),
-		Color = Color3.fromRGB(40, 40, 40), Material = Enum.Material.Metal, CanCollide = false })
-	local fixture = part({ Name = "LightFixture", Size = Vector3.new(4, 0.35, 1.2),
-		Position = pos + Vector3.new(0, fixtureY, 0),
-		Color = Color3.fromRGB(235, 240, 225), Material = Enum.Material.Neon, CanCollide = false })
+	part({ Parent = propsFolder, Name = "FloodlightPole", Size = Vector3.new(0.7, 13, 0.7),
+		Position = pos + Vector3.new(0, FLOOR_TOP + 6.5, 0), Color = Color3.fromRGB(60, 60, 62), Material = Enum.Material.Metal })
+	local head = part({ Parent = propsFolder, Name = "FloodlightHead", Size = Vector3.new(2.6, 1, 1.4),
+		Position = pos + Vector3.new(0.9, FLOOR_TOP + 13, 0),
+		Color = Color3.fromRGB(235, 240, 225), Material = Enum.Material.Neon })
 	local light = Instance.new("PointLight")
 	light.Range = 34
-	light.Brightness = 1.3
+	light.Brightness = 1.2
 	light.Color = Color3.fromRGB(225, 235, 215)
 	light.Shadows = true
-	light.Parent = fixture
-	table.insert(facilityFixtures, { fixture = fixture, light = light })
+	light.Parent = head
+	table.insert(facilityFixtures, { fixture = head, light = light })
 end
-for _, pos in { Vector3.new(45, 0, 0), Vector3.new(-45, 0, 0), Vector3.new(0, 0, 45), Vector3.new(0, 0, -45) } do
-	local fixture = part({ Name = "EmergencyLight", Size = Vector3.new(1.4, 0.8, 0.8),
-		Position = pos + Vector3.new(1.8, FLOOR_TOP + 12, 0),
-		Color = Color3.fromRGB(70, 26, 26), Material = Enum.Material.SmoothPlastic, CanCollide = false })
+for _, beacon in { Vector3.new(0, FLOOR_TOP + 38.5, 100), Vector3.new(-24, FLOOR_TOP + 20.5, 6) } do
+	local fixture = part({ Parent = propsFolder, Name = "Beacon", Size = Vector3.new(1.1, 1.1, 1.1),
+		Position = beacon, Color = Color3.fromRGB(70, 26, 26), Material = Enum.Material.SmoothPlastic })
 	local light = Instance.new("PointLight")
-	light.Range = 24
-	light.Brightness = 1.4
+	light.Range = 28
+	light.Brightness = 1.6
 	light.Color = Color3.fromRGB(255, 60, 50)
 	light.Shadows = true
 	light.Enabled = false
@@ -341,17 +702,18 @@ for _, pos in { Vector3.new(45, 0, 0), Vector3.new(-45, 0, 0), Vector3.new(0, 0,
 	table.insert(emergencyFixtures, { fixture = fixture, light = light })
 end
 
--- Central safe-zone lamp
-local lampPost = part({ Name = "LampPost", Size = Vector3.new(1.2, 12, 1.2), Position = Vector3.new(0, 6, 0),
-	Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.Metal })
-local lampHead = part({ Name = "LampHead", Size = Vector3.new(3, 1.4, 3), Position = Vector3.new(0, 12.6, 0),
-	Color = Color3.fromRGB(255, 235, 180), Material = Enum.Material.Neon })
+-- Safe-zone lamp inside the hall (the gameplay anchor), plus vote ring.
+local lampPost = part({ Name = "LampPost", Size = Vector3.new(1, 9, 1), Position = Vector3.new(12, FLOOR_TOP + 4.5, 9),
+	Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.Metal, Parent = hall })
+local lampHead = part({ Name = "LampHead", Size = Vector3.new(2.4, 1.2, 2.4), Position = Vector3.new(12, FLOOR_TOP + 9.6, 9),
+	Color = Color3.fromRGB(255, 235, 180), Material = Enum.Material.Neon, Parent = hall })
 local lampLight = Instance.new("PointLight")
-lampLight.Range = SAFE_ZONE_RADIUS + 8
+lampLight.Range = SAFE_ZONE_RADIUS + 10
 lampLight.Brightness = 2.5
 lampLight.Color = Color3.fromRGB(255, 230, 170)
 lampLight.Shadows = true
 lampLight.Parent = lampHead
+local _ = lampPost
 
 -- Subtle flicker sells the "old bulb" look under Future lighting.
 task.spawn(function()
@@ -364,46 +726,29 @@ end)
 
 local safeRing = part({ Name = "SafeRing", Shape = Enum.PartType.Cylinder,
 	Size = Vector3.new(0.2, SAFE_ZONE_RADIUS * 2, SAFE_ZONE_RADIUS * 2),
-	CFrame = CFrame.new(0, 1.4, 0) * CFrame.Angles(0, 0, math.rad(90)),
+	CFrame = CFrame.new(0, FLOOR_TOP + 0.45, 0) * CFrame.Angles(0, 0, math.rad(90)),
 	Color = Color3.fromRGB(255, 230, 170), Material = Enum.Material.Neon, Transparency = 0.7, CanCollide = false })
+local _ = safeRing
 
-local spawnPoint = Instance.new("SpawnLocation")
-spawnPoint.Size = Vector3.new(6, 1, 6)
-spawnPoint.Position = Vector3.new(0, 1.1, 6)
-spawnPoint.Anchored = true
-spawnPoint.Transparency = 1
-spawnPoint.CanCollide = false
-spawnPoint.Parent = arena
+print("[NightShift] map: build complete")
 
--- ===================== FACILITY CLUTTER =====================
--- Crates, barrels, and pallets scattered through the halls — cover and
+-- ===================== YARD CLUTTER =====================
+-- Crates, barrels, and pallets scattered across the site — cover and
 -- hiding spots. Reshuffled every match so sightlines never get stale.
 local clutterFolder: Folder? = nil
 
-local GEN_POSITIONS: { Vector3 } = {}
-for i = 1, GENERATOR_COUNT do
-	local angle = (i / GENERATOR_COUNT) * math.pi * 2
-	table.insert(GEN_POSITIONS, Vector3.new(math.cos(angle), 0, math.sin(angle)) * GEN_CIRCLE_RADIUS)
-end
-
 local function clutterSpotFree(pos: Vector3): boolean
-	if pos.Magnitude < SAFE_ZONE_RADIUS + 4 then
+	if pos.Magnitude < SAFE_ZONE_RADIUS + 6 then
 		return false
 	end
-	for _, g in GEN_POSITIONS do
-		if (pos - g).Magnitude < 12 then
-			return false
-		end
-	end
-	-- Keep doorways passable.
-	for _, d in DOOR_POSITIONS do
-		if (pos - d).Magnitude < 8 then
-			return false
-		end
-	end
-	-- Keep clear of the interior wall grid lines (x/z = ±30).
-	if math.abs(math.abs(pos.X) - 30) < 4 or math.abs(math.abs(pos.Z) - 30) < 4 then
+	if insideKeepClear(pos) then
 		return false
+	end
+	if nearGenerator(pos, 12) then
+		return false
+	end
+	if math.abs(pos.X) < 7 and pos.Z < -17 then
+		return false -- exit road
 	end
 	return true
 end
@@ -468,13 +813,13 @@ local function generateClutter()
 		clutterFolder:Destroy()
 	end
 	local folder = Instance.new("Folder")
-	folder.Name = "FacilityClutter"
+	folder.Name = "YardClutter"
 	folder.Parent = arena
 	clutterFolder = folder
 
 	local rng = Random.new()
-	for _ = 1, 55 do
-		local pos = Vector3.new(rng:NextNumber(-82, 82), 0, rng:NextNumber(-82, 82))
+	for _ = 1, 60 do
+		local pos = Vector3.new(rng:NextNumber(-112, 112), 0, rng:NextNumber(-112, 112))
 		if clutterSpotFree(pos) then
 			local choice = rng:NextInteger(1, 3)
 			if choice == 1 then
@@ -538,11 +883,11 @@ local ambientNightSound = makeSound({
 	SoundId = SOUND_IDS.ambientNight, Looped = true, Volume = 0.4, Parent = SoundService,
 })
 
--- Generators
+-- ---- Stage 5: generators (hand-placed, hidden near cover) ----
 local function buildGenerators()
+	print("[NightShift] map: generators…")
 	for i = 1, GENERATOR_COUNT do
-		local angle = (i / GENERATOR_COUNT) * math.pi * 2
-		local pos = Vector3.new(math.cos(angle), 0, math.sin(angle)) * GEN_CIRCLE_RADIUS
+		local pos = GEN_POSITIONS[i]
 
 		local model = Instance.new("Model")
 		model.Name = "Generator_" .. i
@@ -1227,9 +1572,9 @@ local function runMatch()
 		-- ===== NIGHT =====
 		phase = "night"
 		setNight()
-		local spawnAngle = math.random() * math.pi * 2
-		monsterPos = Vector3.new(math.cos(spawnAngle), 0, math.sin(spawnAngle)) * (ARENA_SIZE / 2 - 8)
-		monsterPos = Vector3.new(monsterPos.X, 3.5, monsterPos.Z)
+		-- The Watcher emerges beside a random far-off generator.
+		local emergeAt = GEN_POSITIONS[math.random(GENERATOR_COUNT)]
+		monsterPos = Vector3.new(emergeAt.X, 3.5, emergeAt.Z)
 		timeLeft = NIGHT_SECONDS
 		Feed:FireAllClients("🌑 NIGHT " .. night .. ". It is here. Stay in the light.")
 		if not monsterGrowlSound.IsPlaying then monsterGrowlSound:Play() end
