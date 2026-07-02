@@ -159,9 +159,23 @@ local function part(props: { [string]: any }): Part
 	return p
 end
 
--- Floor + perimeter walls (dark, decaying earth for the haunted town)
-part({ Name = "HauntedGround", Size = Vector3.new(ARENA_SIZE, 1, ARENA_SIZE), Position = Vector3.new(0, 0.5, 0),
-	Color = Color3.fromRGB(24, 28, 24), Material = Enum.Material.Mud })
+-- Woodland terrain ground: voxel mud with mossy grass and dirt patches.
+-- Real terrain (not a flat part) picks up Future-phase lighting, and
+-- Decoration = true grows animated grass blades on the Grass material.
+local terrain = Workspace.Terrain
+terrain.Decoration = true
+terrain:FillBlock(CFrame.new(0, -2.5, 0), Vector3.new(ARENA_SIZE + 24, 7, ARENA_SIZE + 24), Enum.Material.Mud)
+do
+	local random = Random.new(7) -- fixed seed: ground stays stable across matches
+	for _ = 1, 140 do
+		local x = random:NextNumber(-ARENA_SIZE / 2, ARENA_SIZE / 2)
+		local z = random:NextNumber(-ARENA_SIZE / 2, ARENA_SIZE / 2)
+		local mat = random:NextInteger(1, 3) == 1 and Enum.Material.Ground or Enum.Material.Grass
+		terrain:FillBlock(CFrame.new(x, -1, z), Vector3.new(random:NextNumber(10, 26), 4, random:NextNumber(10, 26)), mat)
+	end
+	-- Trampled leaf litter around the safe-zone lamp.
+	terrain:FillBlock(CFrame.new(0, -1, 0), Vector3.new(SAFE_ZONE_RADIUS * 2.4, 4, SAFE_ZONE_RADIUS * 2.4), Enum.Material.LeafyGrass)
+end
 for _, w in {
 	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, ARENA_SIZE / 2) },
 	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, -ARENA_SIZE / 2) },
@@ -189,11 +203,21 @@ local lampLight = Instance.new("PointLight")
 lampLight.Range = SAFE_ZONE_RADIUS + 8
 lampLight.Brightness = 2.5
 lampLight.Color = Color3.fromRGB(255, 230, 170)
+lampLight.Shadows = true
 lampLight.Parent = lampHead
+
+-- Subtle flicker sells the "old bulb" look under Future lighting.
+task.spawn(function()
+	local rng = Random.new()
+	while true do
+		task.wait(rng:NextNumber(0.06, 0.2))
+		lampLight.Brightness = 2.3 + rng:NextNumber(-0.5, 0.7)
+	end
+end)
 
 local safeRing = part({ Name = "SafeRing", Shape = Enum.PartType.Cylinder,
 	Size = Vector3.new(0.2, SAFE_ZONE_RADIUS * 2, SAFE_ZONE_RADIUS * 2),
-	CFrame = CFrame.new(0, 1.05, 0) * CFrame.Angles(0, 0, math.rad(90)),
+	CFrame = CFrame.new(0, 1.4, 0) * CFrame.Angles(0, 0, math.rad(90)),
 	Color = Color3.fromRGB(255, 230, 170), Material = Enum.Material.Neon, Transparency = 0.7, CanCollide = false })
 
 local spawnPoint = Instance.new("SpawnLocation")
@@ -210,6 +234,100 @@ spawnPoint.Parent = arena
 -- line-of-sight everywhere, so stepping out of the light means isolation.
 -- Regenerated every match so no one memorizes the maze.
 local hauntedFolder: Folder? = nil
+
+-- A dead tree: leaning cylindrical trunk plus gnarled branches, not a box.
+local function makeTree(folder: Folder, random: Random, pos: Vector3)
+	local height = random:NextNumber(16, 30)
+	local trunkWidth = random:NextNumber(1.6, 3.2)
+	local yaw = math.rad(random:NextNumber(0, 360))
+	local lean = math.rad(random:NextNumber(-6, 6))
+	local trunk = Instance.new("Part")
+	trunk.Name = "GnarledTree"
+	trunk.Shape = Enum.PartType.Cylinder
+	trunk.Size = Vector3.new(height, trunkWidth, trunkWidth)
+	trunk.CFrame = CFrame.new(pos + Vector3.new(0, height / 2, 0))
+		* CFrame.Angles(0, yaw, math.rad(90) + lean)
+	trunk.Anchored = true
+	trunk.Material = Enum.Material.Wood
+	trunk.Color = Color3.fromRGB(52, 41, 33)
+	trunk.Parent = folder
+	for _ = 1, random:NextInteger(2, 4) do
+		local branchLen = random:NextNumber(5, 10)
+		local branchWidth = math.max(0.6, trunkWidth * 0.4)
+		local branch = Instance.new("Part")
+		branch.Name = "Branch"
+		branch.Shape = Enum.PartType.Cylinder
+		branch.Size = Vector3.new(branchLen, branchWidth, branchWidth)
+		branch.CFrame = CFrame.new(pos + Vector3.new(0, height * random:NextNumber(0.45, 0.9), 0))
+			* CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), math.rad(random:NextNumber(15, 55)))
+			* CFrame.new(branchLen / 2, 0, 0)
+		branch.Anchored = true
+		branch.CanCollide = false
+		branch.Material = Enum.Material.Wood
+		branch.Color = Color3.fromRGB(45, 35, 28)
+		branch.Parent = folder
+	end
+end
+
+-- A crumbling brick wall: 2-3 segments of uneven height, like real ruins.
+local function makeRuinedWall(folder: Folder, random: Random, pos: Vector3)
+	local width = random:NextNumber(12, 22)
+	local height = random:NextNumber(6, 11)
+	local base = CFrame.new(pos) * CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), 0)
+	local segments = random:NextInteger(2, 3)
+	local xOffset = -width / 2
+	for _ = 1, segments do
+		local segWidth = (width / segments) * random:NextNumber(0.75, 1)
+		local segHeight = height * random:NextNumber(0.55, 1)
+		local seg = Instance.new("Part")
+		seg.Name = "RuinedWall"
+		seg.Size = Vector3.new(segWidth, segHeight, 2.4)
+		seg.CFrame = base * CFrame.new(xOffset + segWidth / 2, segHeight / 2, 0)
+		seg.Anchored = true
+		seg.Material = Enum.Material.Brick
+		seg.Color = Color3.fromRGB(72, 62, 58)
+		seg.Parent = folder
+		xOffset += width / segments
+	end
+end
+
+-- A rusty corrugated shelter with a collapsed, leaning roof sheet.
+local function makeDebris(folder: Folder, random: Random, pos: Vector3)
+	local base = CFrame.new(pos) * CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), 0)
+	local wallHeight = random:NextNumber(7, 11)
+	local junk = Instance.new("Part")
+	junk.Name = "TownDebris"
+	junk.Size = Vector3.new(8, wallHeight, 0.8)
+	junk.CFrame = base * CFrame.new(0, wallHeight / 2, 0)
+	junk.Anchored = true
+	junk.Material = Enum.Material.CorrodedMetal
+	junk.Color = Color3.fromRGB(74, 46, 38)
+	junk.Parent = folder
+	local roof = Instance.new("Part")
+	roof.Name = "DebrisRoof"
+	roof.Size = Vector3.new(8, 0.6, random:NextNumber(6, 9))
+	roof.CFrame = base * CFrame.new(0, wallHeight, roof.Size.Z / 2 - 0.4)
+		* CFrame.Angles(math.rad(random:NextNumber(-28, -12)), 0, 0)
+	roof.Anchored = true
+	roof.Material = Enum.Material.CorrodedMetal
+	roof.Color = Color3.fromRGB(60, 40, 34)
+	roof.Parent = folder
+end
+
+-- A mossy boulder, half-buried in the mud.
+local function makeBoulder(folder: Folder, random: Random, pos: Vector3)
+	local size = random:NextNumber(2, 6)
+	local rock = Instance.new("Part")
+	rock.Name = "Boulder"
+	rock.Size = Vector3.new(size * random:NextNumber(0.8, 1.4), size, size * random:NextNumber(0.8, 1.4))
+	rock.CFrame = CFrame.new(pos + Vector3.new(0, size * 0.25, 0))
+		* CFrame.Angles(math.rad(random:NextNumber(0, 360)), math.rad(random:NextNumber(0, 360)), math.rad(random:NextNumber(0, 360)))
+	rock.Anchored = true
+	rock.CanCollide = size > 3.5
+	rock.Material = Enum.Material.Rock
+	rock.Color = Color3.fromRGB(68, 74, 66)
+	rock.Parent = folder
+end
 
 local function generateHauntedMap()
 	if hauntedFolder then
@@ -231,42 +349,88 @@ local function generateHauntedMap()
 		if pos.Magnitude > SAFE_ZONE_RADIUS + 2 and pos.Magnitude < GEN_CIRCLE_RADIUS - 12 then
 			local choice = random:NextInteger(1, 3)
 			if choice == 1 then
-				-- A haunted dead tree.
-				local tree = Instance.new("Part")
-				tree.Name = "GnarledTree"
-				tree.Size = Vector3.new(random:NextNumber(2, 4), random:NextNumber(16, 28), random:NextNumber(2, 4))
-				tree.Position = pos + Vector3.new(0, tree.Size.Y / 2, 0)
-				tree.Anchored = true
-				tree.Material = Enum.Material.WoodPlanks
-				tree.Color = Color3.fromRGB(35, 25, 20) -- dark rotting wood
-				tree.Parent = folder
+				makeTree(folder, random, pos)
 			elseif choice == 2 then
-				-- A ruined town brick wall.
-				local wall = Instance.new("Part")
-				wall.Name = "RuinedWall"
-				wall.Size = Vector3.new(random:NextNumber(12, 22), random:NextNumber(8, 14), 3)
-				wall.Orientation = Vector3.new(0, random:NextNumber(0, 360), 0)
-				wall.Position = pos + Vector3.new(0, wall.Size.Y / 2, 0)
-				wall.Anchored = true
-				wall.Material = Enum.Material.Slate -- old town masonry
-				wall.Color = Color3.fromRGB(45, 40, 40) -- weathered stone
-				wall.Parent = folder
+				makeRuinedWall(folder, random, pos)
 			else
-				-- Rusty corrugated shelter (a DbD-style loop wall).
-				local junk = Instance.new("Part")
-				junk.Name = "TownDebris"
-				junk.Size = Vector3.new(8, 12, 8)
-				junk.Orientation = Vector3.new(0, random:NextNumber(0, 360), 0)
-				junk.Position = pos + Vector3.new(0, junk.Size.Y / 2, 0)
-				junk.Anchored = true
-				junk.Material = Enum.Material.CorrodedMetal
-				junk.Color = Color3.fromRGB(74, 46, 38)
-				junk.Parent = folder
+				makeDebris(folder, random, pos)
 			end
+		end
+	end
+
+	-- Boulders scatter the whole arena, including outside the generator ring.
+	for _ = 1, 45 do
+		local x = random:NextNumber(-ARENA_SIZE / 2 + 8, ARENA_SIZE / 2 - 8)
+		local z = random:NextNumber(-ARENA_SIZE / 2 + 8, ARENA_SIZE / 2 - 8)
+		local pos = ARENA_CENTER + Vector3.new(x, 0, z)
+		if pos.Magnitude > SAFE_ZONE_RADIUS + 2 then
+			makeBoulder(folder, random, pos)
 		end
 	end
 end
 generateHauntedMap()
+
+-- ===================== AMBIENT VFX =====================
+-- Rolling ground mist and drifting fireflies, using textures that ship
+-- with the Roblox client (rbxasset://) so nothing needs the catalog.
+local function makeEmitterAnchor(name: string, pos: Vector3): Part
+	local anchor = Instance.new("Part")
+	anchor.Name = name
+	anchor.Size = Vector3.new(1, 1, 1)
+	anchor.Position = pos
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.Transparency = 1
+	anchor.Parent = arena
+	return anchor
+end
+
+do
+	local rng = Random.new(11)
+	for i = 1, 10 do
+		local angle = (i / 10) * math.pi * 2
+		local radius = rng:NextNumber(20, ARENA_SIZE / 2 - 20)
+		local anchor = makeEmitterAnchor("MistEmitter", Vector3.new(math.cos(angle) * radius, 2.5, math.sin(angle) * radius))
+		local mist = Instance.new("ParticleEmitter")
+		mist.Texture = "rbxasset://textures/particles/smoke_main.dds"
+		mist.Size = NumberSequence.new(rng:NextNumber(14, 20), rng:NextNumber(20, 26))
+		mist.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.3, 0.72),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		mist.Color = ColorSequence.new(Color3.fromRGB(160, 170, 175))
+		mist.Lifetime = NumberRange.new(6, 11)
+		mist.Rate = 2
+		mist.Speed = NumberRange.new(0.4, 1.2)
+		mist.SpreadAngle = Vector2.new(180, 15)
+		mist.Rotation = NumberRange.new(0, 360)
+		mist.RotSpeed = NumberRange.new(-4, 4)
+		mist.LightInfluence = 1
+		mist.Parent = anchor
+	end
+	for _ = 1, 6 do
+		local anchor = makeEmitterAnchor("FireflyEmitter",
+			Vector3.new(rng:NextNumber(-70, 70), rng:NextNumber(3, 6), rng:NextNumber(-70, 70)))
+		local flies = Instance.new("ParticleEmitter")
+		flies.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		flies.Size = NumberSequence.new(0.25)
+		flies.Color = ColorSequence.new(Color3.fromRGB(180, 220, 120))
+		flies.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.2, 0.2),
+			NumberSequenceKeypoint.new(0.8, 0.3),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		flies.Lifetime = NumberRange.new(4, 8)
+		flies.Rate = 3
+		flies.Speed = NumberRange.new(0.3, 0.9)
+		flies.SpreadAngle = Vector2.new(180, 180)
+		flies.LightEmission = 1
+		flies.LightInfluence = 0
+		flies.Parent = anchor
+	end
+end
 
 -- ===================== AMBIENT SOUND =====================
 local ambientDaySound = makeSound({
@@ -298,6 +462,7 @@ local function buildGenerators()
 		light.Range = 26
 		light.Brightness = 1.6
 		light.Color = Color3.fromRGB(200, 255, 200)
+		light.Shadows = true
 		light.Parent = body
 
 		local prompt = Instance.new("ProximityPrompt")
@@ -404,26 +569,80 @@ local function safeZoneActive(): boolean
 	return brokenCount() < math.ceil(GENERATOR_COUNT / 2)
 end
 
+-- ===================== ATMOSPHERE & POST-PROCESSING =====================
+-- Showcase-grade visuals: volumetric Atmosphere (replaces classic fog,
+-- which Roblox ignores once an Atmosphere exists), filmic color grading,
+-- soft bloom, and far-field depth of field. Lighting.Technology is set to
+-- Future in the place file (scripts can't change it) so every light here
+-- casts real per-pixel shadows.
+local atmosphere = Instance.new("Atmosphere")
+atmosphere.Parent = Lighting
+
+local colorGrade = Instance.new("ColorCorrectionEffect")
+colorGrade.Parent = Lighting
+
+local bloom = Instance.new("BloomEffect")
+bloom.Intensity = 0.45
+bloom.Size = 28
+bloom.Threshold = 1.1
+bloom.Parent = Lighting
+
+local depthOfField = Instance.new("DepthOfFieldEffect")
+depthOfField.FocusDistance = 25
+depthOfField.InFocusRadius = 45
+depthOfField.NearIntensity = 0
+depthOfField.FarIntensity = 0.3
+depthOfField.Parent = Lighting
+
+local sunRays = Instance.new("SunRaysEffect")
+sunRays.Intensity = 0.1
+sunRays.Spread = 0.6
+sunRays.Parent = Lighting
+
+local clouds = Instance.new("Clouds")
+clouds.Parent = terrain
+
 -- ===================== LIGHTING =====================
 local function setDay()
+	-- Overcast woodland afternoon: soft light, thin haze, drifting clouds.
 	Lighting.ClockTime = 13
-	Lighting.Ambient = Color3.fromRGB(140, 140, 140)
-	Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 150)
-	Lighting.FogStart = 0
-	Lighting.FogEnd = 1000
-	Lighting.FogColor = Color3.fromRGB(180, 180, 190)
+	Lighting.Ambient = Color3.fromRGB(70, 72, 70)
+	Lighting.OutdoorAmbient = Color3.fromRGB(96, 100, 96)
+	atmosphere.Density = 0.32
+	atmosphere.Offset = 0.25
+	atmosphere.Color = Color3.fromRGB(199, 199, 190)
+	atmosphere.Decay = Color3.fromRGB(106, 112, 125)
+	atmosphere.Haze = 1.8
+	atmosphere.Glare = 0.3
+	colorGrade.Saturation = -0.12
+	colorGrade.Contrast = 0.05
+	colorGrade.TintColor = Color3.fromRGB(255, 250, 240)
+	sunRays.Intensity = 0.12
+	clouds.Cover = 0.65
+	clouds.Density = 0.25
+	clouds.Color = Color3.fromRGB(210, 210, 215)
 	if ambientNightSound.IsPlaying then ambientNightSound:Stop() end
 	if not ambientDaySound.IsPlaying then ambientDaySound:Play() end
 end
 
 local function setNight()
-	-- Dead by Daylight midnight: pitch black, shrouded in dense grey mist.
+	-- Dead by Daylight midnight: pitch black, shrouded in dense cold mist.
 	Lighting.ClockTime = 0
 	Lighting.Ambient = Color3.fromRGB(0, 0, 0)
 	Lighting.OutdoorAmbient = Color3.fromRGB(15, 15, 20)
-	Lighting.FogStart = 10
-	Lighting.FogEnd = 65 -- anything past 65 studs disappears into the fog
-	Lighting.FogColor = Color3.fromRGB(20, 24, 25)
+	atmosphere.Density = 0.55 -- the treeline dissolves into the murk
+	atmosphere.Offset = 0
+	atmosphere.Color = Color3.fromRGB(31, 36, 38)
+	atmosphere.Decay = Color3.fromRGB(12, 14, 18)
+	atmosphere.Haze = 3
+	atmosphere.Glare = 0
+	colorGrade.Saturation = -0.4
+	colorGrade.Contrast = 0.15
+	colorGrade.TintColor = Color3.fromRGB(205, 215, 235)
+	sunRays.Intensity = 0
+	clouds.Cover = 0.85
+	clouds.Density = 0.4
+	clouds.Color = Color3.fromRGB(25, 28, 34)
 	if ambientDaySound.IsPlaying then ambientDaySound:Stop() end
 	if not ambientNightSound.IsPlaying then ambientNightSound:Play() end
 end
@@ -486,6 +705,7 @@ local function giveFlashlight(player: Player)
 	spot.Brightness = 4
 	spot.Face = Enum.NormalId.Front
 	spot.Color = beamColor
+	spot.Shadows = true -- trees and ruins throw moving shadows in the beam
 	spot.Parent = handle
 	tool.Parent = backpack
 end

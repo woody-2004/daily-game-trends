@@ -63,11 +63,14 @@ rbxlx = f"""<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="h
 \t<Item class="Lighting" referent="RBX6">
 \t\t<Properties>
 \t\t\t<string name="Name">Lighting</string>
+\t\t\t<token name="Technology">4</token>
+\t\t\t<bool name="GlobalShadows">true</bool>
+\t\t\t<float name="Brightness">3</float>
+\t\t\t<float name="ShadowSoftness">0.2</float>
+\t\t\t<float name="EnvironmentDiffuseScale">1</float>
+\t\t\t<float name="EnvironmentSpecularScale">1</float>
 \t\t\t<Color3 name="Ambient"><R>0</R><G>0</G><B>0</B></Color3>
 \t\t\t<Color3 name="OutdoorAmbient"><R>0.0588235</R><G>0.0588235</G><B>0.0784314</B></Color3>
-\t\t\t<Color3 name="FogColor"><R>0.0784314</R><G>0.0941176</G><B>0.0980392</B></Color3>
-\t\t\t<float name="FogStart">10</float>
-\t\t\t<float name="FogEnd">65</float>
 \t\t\t<string name="TimeOfDay">00:00:00</string>
 \t\t</Properties>
 \t</Item>
