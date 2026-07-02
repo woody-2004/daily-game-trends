@@ -1,0 +1,13 @@
+{
+  "name": "best-friends",
+  "version": "0.1.0",
+  "description": "Everyone is secretly a traitor — Jackbox-style party game prototype",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "socket.io": "^4.7.0"
+  }
+}
