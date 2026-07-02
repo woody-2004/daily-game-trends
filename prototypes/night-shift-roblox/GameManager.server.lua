@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "0.5.0"
+local GAME_VERSION = "0.6.0"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -238,15 +238,56 @@ do
 	end
 end
 
--- Interior rooms and corridors (fixed layout so everyone learns the map).
+-- REAL ROOMS, NOT AN OPEN PEN. Full-height walls along x = ±30 and
+-- z = ±30 divide the hall into a 3x3 grid: the safe hub in the middle,
+-- eight rooms around it, connected only through doorways (with lintels).
+-- You can never see across the map — every room is its own dark box.
+local INTERIOR_WALL_T = 1.5
+local DOOR_WIDTH = 8
+local DOOR_HEIGHT = 9
+local DOOR_POSITIONS: { Vector3 } = {} -- so clutter never blocks a doorway
+
+local function wallRun(alongZ: boolean, at: number, doorCenters: { number })
+	local function seg(a: number, b: number, yBottom: number, yTop: number)
+		if b - a < 0.5 then
+			return
+		end
+		local mid = (a + b) / 2
+		local h = yTop - yBottom
+		local size, position
+		if alongZ then
+			size = Vector3.new(INTERIOR_WALL_T, h, b - a)
+			position = Vector3.new(at, yBottom + h / 2, mid)
+		else
+			size = Vector3.new(b - a, h, INTERIOR_WALL_T)
+			position = Vector3.new(mid, yBottom + h / 2, at)
+		end
+		part({ Name = "InteriorWall", Size = size, Position = position,
+			Color = Color3.fromRGB(72, 68, 64), Material = Enum.Material.Brick })
+	end
+	table.sort(doorCenters)
+	local cursor = -ARENA_SIZE / 2
+	for _, c in doorCenters do
+		seg(cursor, c - DOOR_WIDTH / 2, FLOOR_TOP, FLOOR_TOP + WALL_HEIGHT)
+		-- Lintel over the doorway, so it reads as a door, not a slot.
+		seg(c - DOOR_WIDTH / 2, c + DOOR_WIDTH / 2, FLOOR_TOP + DOOR_HEIGHT, FLOOR_TOP + WALL_HEIGHT)
+		table.insert(DOOR_POSITIONS, alongZ and Vector3.new(at, 0, c) or Vector3.new(c, 0, at))
+		cursor = c + DOOR_WIDTH / 2
+	end
+	seg(cursor, ARENA_SIZE / 2, FLOOR_TOP, FLOOR_TOP + WALL_HEIGHT)
+end
+
+wallRun(true, -30, { -60, 0, 60 })
+wallRun(true, 30, { -60, 0, 60 })
+wallRun(false, -30, { -60, 0, 60 })
+wallRun(false, 30, { -60, 0, 60 })
+
+-- Low cover walls inside the corner rooms.
 for i, spec in {
-	{ Vector3.new(36, 10, 1.5), Vector3.new(-40, 0, -20) }, { Vector3.new(1.5, 10, 26), Vector3.new(-22, 0, -33) },
-	{ Vector3.new(1.5, 10, 30), Vector3.new(28, 0, -35) }, { Vector3.new(26, 10, 1.5), Vector3.new(41, 0, -20) },
-	{ Vector3.new(30, 10, 1.5), Vector3.new(-28, 0, 28) }, { Vector3.new(1.5, 10, 18), Vector3.new(12, 0, 38) },
-	{ Vector3.new(24, 10, 1.5), Vector3.new(44, 0, 14) }, { Vector3.new(1.5, 10, 20), Vector3.new(-62, 0, 0) },
-	{ Vector3.new(20, 10, 1.5), Vector3.new(0, 0, -30) }, { Vector3.new(1.5, 10, 18), Vector3.new(52, 0, -38) },
+	{ Vector3.new(16, 9, 1.5), Vector3.new(-58, 0, -52) }, { Vector3.new(1.5, 9, 16), Vector3.new(-52, 0, 58) },
+	{ Vector3.new(16, 9, 1.5), Vector3.new(56, 0, 50) }, { Vector3.new(1.5, 9, 16), Vector3.new(58, 0, -50) },
 } do
-	part({ Name = "RoomWall" .. i, Size = spec[1], Position = spec[2] + Vector3.new(0, 5 + FLOOR_TOP, 0),
+	part({ Name = "CoverWall" .. i, Size = spec[1], Position = spec[2] + Vector3.new(0, 4.5 + FLOOR_TOP, 0),
 		Color = Color3.fromRGB(70, 66, 62), Material = Enum.Material.Brick })
 end
 
@@ -353,6 +394,16 @@ local function clutterSpotFree(pos: Vector3): boolean
 		if (pos - g).Magnitude < 12 then
 			return false
 		end
+	end
+	-- Keep doorways passable.
+	for _, d in DOOR_POSITIONS do
+		if (pos - d).Magnitude < 8 then
+			return false
+		end
+	end
+	-- Keep clear of the interior wall grid lines (x/z = ±30).
+	if math.abs(math.abs(pos.X) - 30) < 4 or math.abs(math.abs(pos.Z) - 30) < 4 then
+		return false
 	end
 	return true
 end
