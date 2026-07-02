@@ -79,8 +79,10 @@ local MOLE_SABOTAGE_COOLDOWN = 20
 local MOLE_LURE_PER_NIGHT = 1
 local MOLE_LURE_DURATION = 8
 
-local ARENA_SIZE = 140
-local GEN_CIRCLE_RADIUS = 52
+local ARENA_SIZE = 220 -- big enough for the haunted town to spread out
+local ARENA_CENTER = Vector3.new(0, 0, 0)
+local GEN_CIRCLE_RADIUS = 80
+local HAUNTED_OBSTACLE_COUNT = 95 -- density of the forest/town maze
 
 -- ===================== REMOTES =====================
 local remotes = Instance.new("Folder")
@@ -157,9 +159,9 @@ local function part(props: { [string]: any }): Part
 	return p
 end
 
--- Floor + perimeter walls
-part({ Name = "Floor", Size = Vector3.new(ARENA_SIZE, 1, ARENA_SIZE), Position = Vector3.new(0, 0.5, 0),
-	Color = Color3.fromRGB(38, 38, 44), Material = Enum.Material.Concrete })
+-- Floor + perimeter walls (dark, decaying earth for the haunted town)
+part({ Name = "HauntedGround", Size = Vector3.new(ARENA_SIZE, 1, ARENA_SIZE), Position = Vector3.new(0, 0.5, 0),
+	Color = Color3.fromRGB(24, 28, 24), Material = Enum.Material.Mud })
 for _, w in {
 	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, ARENA_SIZE / 2) },
 	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, -ARENA_SIZE / 2) },
@@ -201,6 +203,70 @@ spawnPoint.Anchored = true
 spawnPoint.Transparency = 1
 spawnPoint.CanCollide = false
 spawnPoint.Parent = arena
+
+-- ===================== HAUNTED ENVIRONMENT GENERATOR =====================
+-- Fills the void between the safe zone and the generator ring with a dense
+-- maze of dead trees, crumbling brick walls, and rusted debris. Blocks
+-- line-of-sight everywhere, so stepping out of the light means isolation.
+-- Regenerated every match so no one memorizes the maze.
+local hauntedFolder: Folder? = nil
+
+local function generateHauntedMap()
+	if hauntedFolder then
+		hauntedFolder:Destroy()
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "HauntedMap"
+	folder.Parent = arena
+	hauntedFolder = folder
+
+	local random = Random.new()
+	for _ = 1, HAUNTED_OBSTACLE_COUNT do
+		-- Pick a random spot on the map grid.
+		local x = random:NextNumber(-90, 90)
+		local z = random:NextNumber(-90, 90)
+		local pos = ARENA_CENTER + Vector3.new(x, 0, z)
+
+		-- Don't spawn obstacles on the safe zone or the generator ring.
+		if pos.Magnitude > SAFE_ZONE_RADIUS + 2 and pos.Magnitude < GEN_CIRCLE_RADIUS - 12 then
+			local choice = random:NextInteger(1, 3)
+			if choice == 1 then
+				-- A haunted dead tree.
+				local tree = Instance.new("Part")
+				tree.Name = "GnarledTree"
+				tree.Size = Vector3.new(random:NextNumber(2, 4), random:NextNumber(16, 28), random:NextNumber(2, 4))
+				tree.Position = pos + Vector3.new(0, tree.Size.Y / 2, 0)
+				tree.Anchored = true
+				tree.Material = Enum.Material.WoodPlanks
+				tree.Color = Color3.fromRGB(35, 25, 20) -- dark rotting wood
+				tree.Parent = folder
+			elseif choice == 2 then
+				-- A ruined town brick wall.
+				local wall = Instance.new("Part")
+				wall.Name = "RuinedWall"
+				wall.Size = Vector3.new(random:NextNumber(12, 22), random:NextNumber(8, 14), 3)
+				wall.Orientation = Vector3.new(0, random:NextNumber(0, 360), 0)
+				wall.Position = pos + Vector3.new(0, wall.Size.Y / 2, 0)
+				wall.Anchored = true
+				wall.Material = Enum.Material.Slate -- old town masonry
+				wall.Color = Color3.fromRGB(45, 40, 40) -- weathered stone
+				wall.Parent = folder
+			else
+				-- Rusty corrugated shelter (a DbD-style loop wall).
+				local junk = Instance.new("Part")
+				junk.Name = "TownDebris"
+				junk.Size = Vector3.new(8, 12, 8)
+				junk.Orientation = Vector3.new(0, random:NextNumber(0, 360), 0)
+				junk.Position = pos + Vector3.new(0, junk.Size.Y / 2, 0)
+				junk.Anchored = true
+				junk.Material = Enum.Material.CorrodedMetal
+				junk.Color = Color3.fromRGB(74, 46, 38)
+				junk.Parent = folder
+			end
+		end
+	end
+end
+generateHauntedMap()
 
 -- ===================== AMBIENT SOUND =====================
 local ambientDaySound = makeSound({
@@ -343,6 +409,7 @@ local function setDay()
 	Lighting.ClockTime = 13
 	Lighting.Ambient = Color3.fromRGB(140, 140, 140)
 	Lighting.OutdoorAmbient = Color3.fromRGB(150, 150, 150)
+	Lighting.FogStart = 0
 	Lighting.FogEnd = 1000
 	Lighting.FogColor = Color3.fromRGB(180, 180, 190)
 	if ambientNightSound.IsPlaying then ambientNightSound:Stop() end
@@ -350,11 +417,13 @@ local function setDay()
 end
 
 local function setNight()
+	-- Dead by Daylight midnight: pitch black, shrouded in dense grey mist.
 	Lighting.ClockTime = 0
-	Lighting.Ambient = Color3.fromRGB(8, 8, 14)
-	Lighting.OutdoorAmbient = Color3.fromRGB(6, 6, 12)
-	Lighting.FogEnd = 80
-	Lighting.FogColor = Color3.fromRGB(4, 4, 8)
+	Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+	Lighting.OutdoorAmbient = Color3.fromRGB(15, 15, 20)
+	Lighting.FogStart = 10
+	Lighting.FogEnd = 65 -- anything past 65 studs disappears into the fog
+	Lighting.FogColor = Color3.fromRGB(20, 24, 25)
 	if ambientDaySound.IsPlaying then ambientDaySound:Stop() end
 	if not ambientNightSound.IsPlaying then ambientNightSound:Play() end
 end
@@ -767,6 +836,9 @@ local function runMatch()
 		g.broken = false
 		updateGeneratorVisual(g)
 	end
+
+	-- Fresh haunted maze every match.
+	generateHauntedMap()
 
 	for _, c in roster do
 		c.player:LoadCharacter()

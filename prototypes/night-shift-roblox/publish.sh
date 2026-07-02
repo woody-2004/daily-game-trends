@@ -12,9 +12,14 @@ if [ -z "$ROBLOX_API_KEY" ]; then
   exit 1
 fi
 
-curl -sS -X POST \
+# Roblox rejects place files with any bytes after </roblox> ("Invalid
+# Content stream"), so strip trailing newlines before uploading.
+BODY="$(cat "${RBXLX}")"
+
+printf '%s' "$BODY" | curl -sS -X POST \
   "https://apis.roblox.com/universes/v1/${UNIVERSE_ID}/places/${PLACE_ID}/versions?versionType=Published" \
   -H "x-api-key: ${ROBLOX_API_KEY}" \
   -H "Content-Type: application/xml" \
-  --data-binary @"${RBXLX}" \
+  -H "Expect:" \
+  --data-binary @- \
   -w "\nHTTP %{http_code}\n"
