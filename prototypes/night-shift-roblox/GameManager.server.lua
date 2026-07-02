@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "0.4.0"
+local GAME_VERSION = "0.5.0"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -84,10 +84,10 @@ local MOLE_SABOTAGE_COOLDOWN = 20
 local MOLE_LURE_PER_NIGHT = 1
 local MOLE_LURE_DURATION = 8
 
-local ARENA_SIZE = 220 -- big enough for the haunted town to spread out
-local ARENA_CENTER = Vector3.new(0, 0, 0)
-local GEN_CIRCLE_RADIUS = 80
-local HAUNTED_OBSTACLE_COUNT = 95 -- density of the forest/town maze
+local ARENA_SIZE = 180 -- interior footprint of the abandoned facility
+local GEN_CIRCLE_RADIUS = 60
+local WALL_HEIGHT = 24
+local FLOOR_TOP = 1
 
 -- ===================== REMOTES =====================
 local remotes = Instance.new("Folder")
@@ -164,40 +164,140 @@ local function part(props: { [string]: any }): Part
 	return p
 end
 
--- Woodland terrain ground: voxel mud with mossy grass and dirt patches.
--- Real terrain (not a flat part) picks up Future-phase lighting, and
--- Decoration = true grows animated grass blades on the Grass material.
-local terrain = Workspace.Terrain
--- Cosmetic-only, so pcall-guarded: scenery must never kill the game loop.
-pcall(function()
-	terrain.Decoration = true
-	terrain:FillBlock(CFrame.new(0, -2.5, 0), Vector3.new(ARENA_SIZE + 24, 7, ARENA_SIZE + 24), Enum.Material.Mud)
-	local random = Random.new(7) -- fixed seed: ground stays stable across matches
-	for _ = 1, 140 do
-		local x = random:NextNumber(-ARENA_SIZE / 2, ARENA_SIZE / 2)
-		local z = random:NextNumber(-ARENA_SIZE / 2, ARENA_SIZE / 2)
-		local mat = random:NextInteger(1, 3) == 1 and Enum.Material.Ground or Enum.Material.Grass
-		terrain:FillBlock(CFrame.new(x, -1, z), Vector3.new(random:NextNumber(10, 26), 4, random:NextNumber(10, 26)), mat)
+-- ABANDONED FACILITY INTERIOR. One coherent industrial space: a solid
+-- concrete slab, rusted panel walls with concrete pillars, a girder
+-- ceiling with collapsed panels, and fixed rooms and corridors. A single
+-- consistent palette (concrete grey / rust / dim hazard tones) is what
+-- keeps it from reading as loose Roblox parts.
+
+-- Solid slab: a real Part, so nothing can ever fall through the floor.
+part({ Name = "Floor", Size = Vector3.new(ARENA_SIZE + 4, 2, ARENA_SIZE + 4), Position = Vector3.new(0, 0, 0),
+	Color = Color3.fromRGB(92, 92, 94), Material = Enum.Material.Concrete })
+
+-- Oil stains and grime patches break up the clean slab.
+do
+	local rng = Random.new(3)
+	for _ = 1, 24 do
+		part({ Name = "FloorStain", CanCollide = false, Material = Enum.Material.Asphalt,
+			Size = Vector3.new(rng:NextNumber(5, 16), 0.05, rng:NextNumber(5, 16)),
+			Position = Vector3.new(rng:NextNumber(-80, 80), FLOOR_TOP + rng:NextNumber(0.01, 0.04), rng:NextNumber(-80, 80)),
+			Color = Color3.fromRGB(40 + rng:NextInteger(0, 12), 40, 38) })
 	end
-	-- Trampled leaf litter around the safe-zone lamp.
-	terrain:FillBlock(CFrame.new(0, -1, 0), Vector3.new(SAFE_ZONE_RADIUS * 2.4, 4, SAFE_ZONE_RADIUS * 2.4), Enum.Material.LeafyGrass)
-end)
-for _, w in {
-	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, ARENA_SIZE / 2) },
-	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, -ARENA_SIZE / 2) },
-	{ Vector3.new(2, 14, ARENA_SIZE), Vector3.new(ARENA_SIZE / 2, 7, 0) },
-	{ Vector3.new(2, 14, ARENA_SIZE), Vector3.new(-ARENA_SIZE / 2, 7, 0) },
-} do
-	part({ Name = "Wall", Size = w[1], Position = w[2], Color = Color3.fromRGB(25, 25, 30), Material = Enum.Material.Slate })
 end
 
--- Scattered interior cover walls (fixed layout so everyone learns the map)
-for i, spec in {
-	{ Vector3.new(18, 9, 2), Vector3.new(-30, 4.5, 18) }, { Vector3.new(2, 9, 22), Vector3.new(24, 4.5, -26) },
-	{ Vector3.new(14, 9, 2), Vector3.new(34, 4.5, 30) }, { Vector3.new(2, 9, 16), Vector3.new(-40, 4.5, -22) },
-	{ Vector3.new(12, 9, 2), Vector3.new(6, 4.5, -44) }, { Vector3.new(2, 9, 14), Vector3.new(-8, 4.5, 40) },
+-- Perimeter: rusted panel walls braced by concrete pillars.
+for _, w in {
+	{ Vector3.new(ARENA_SIZE + 4, WALL_HEIGHT, 2), Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, ARENA_SIZE / 2) },
+	{ Vector3.new(ARENA_SIZE + 4, WALL_HEIGHT, 2), Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, -ARENA_SIZE / 2) },
+	{ Vector3.new(2, WALL_HEIGHT, ARENA_SIZE + 4), Vector3.new(ARENA_SIZE / 2, WALL_HEIGHT / 2 + FLOOR_TOP, 0) },
+	{ Vector3.new(2, WALL_HEIGHT, ARENA_SIZE + 4), Vector3.new(-ARENA_SIZE / 2, WALL_HEIGHT / 2 + FLOOR_TOP, 0) },
 } do
-	part({ Name = "Cover" .. i, Size = spec[1], Position = spec[2], Color = Color3.fromRGB(30, 30, 36), Material = Enum.Material.Slate })
+	part({ Name = "Wall", Size = w[1], Position = w[2], Color = Color3.fromRGB(64, 58, 52), Material = Enum.Material.CorrodedMetal })
+end
+for i = -2, 2 do
+	local offset = ARENA_SIZE / 2 - 2
+	for _, pos in {
+		Vector3.new(i * 36, 0, offset), Vector3.new(i * 36, 0, -offset),
+		Vector3.new(offset, 0, i * 36), Vector3.new(-offset, 0, i * 36),
+	} do
+		part({ Name = "Pillar", Size = Vector3.new(3, WALL_HEIGHT, 3),
+			Position = pos + Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, 0),
+			Color = Color3.fromRGB(96, 96, 98), Material = Enum.Material.Concrete })
+	end
+end
+
+-- Free-standing support columns through the open floor.
+local COLUMN_POSITIONS = {
+	Vector3.new(45, 0, 0), Vector3.new(-45, 0, 0), Vector3.new(0, 0, 45), Vector3.new(0, 0, -45),
+	Vector3.new(45, 0, 45), Vector3.new(45, 0, -45), Vector3.new(-45, 0, 45), Vector3.new(-45, 0, -45),
+}
+for _, pos in COLUMN_POSITIONS do
+	part({ Name = "Column", Size = Vector3.new(3, WALL_HEIGHT, 3),
+		Position = pos + Vector3.new(0, WALL_HEIGHT / 2 + FLOOR_TOP, 0),
+		Color = Color3.fromRGB(96, 96, 98), Material = Enum.Material.Concrete })
+end
+
+-- Roof: steel girders and a slab ceiling with collapsed panels, so the
+-- night sky (and shafts of moonlight) leak into an otherwise sealed hall.
+for i = -2, 2 do
+	part({ Name = "Girder", Size = Vector3.new(ARENA_SIZE, 1.5, 1.5),
+		Position = Vector3.new(0, FLOOR_TOP + WALL_HEIGHT - 0.75, i * 36),
+		Color = Color3.fromRGB(52, 48, 46), Material = Enum.Material.Metal })
+end
+do
+	local rng = Random.new(5)
+	local panel = ARENA_SIZE / 6
+	for gx = 0, 5 do
+		for gz = 0, 5 do
+			if rng:NextNumber() > 0.16 then -- some panels have collapsed
+				part({ Name = "Ceiling", Size = Vector3.new(panel, 1, panel),
+					Position = Vector3.new(-ARENA_SIZE / 2 + panel * (gx + 0.5), FLOOR_TOP + WALL_HEIGHT + 0.5, -ARENA_SIZE / 2 + panel * (gz + 0.5)),
+					Color = Color3.fromRGB(46, 48, 52), Material = Enum.Material.Slate })
+			end
+		end
+	end
+end
+
+-- Interior rooms and corridors (fixed layout so everyone learns the map).
+for i, spec in {
+	{ Vector3.new(36, 10, 1.5), Vector3.new(-40, 0, -20) }, { Vector3.new(1.5, 10, 26), Vector3.new(-22, 0, -33) },
+	{ Vector3.new(1.5, 10, 30), Vector3.new(28, 0, -35) }, { Vector3.new(26, 10, 1.5), Vector3.new(41, 0, -20) },
+	{ Vector3.new(30, 10, 1.5), Vector3.new(-28, 0, 28) }, { Vector3.new(1.5, 10, 18), Vector3.new(12, 0, 38) },
+	{ Vector3.new(24, 10, 1.5), Vector3.new(44, 0, 14) }, { Vector3.new(1.5, 10, 20), Vector3.new(-62, 0, 0) },
+	{ Vector3.new(20, 10, 1.5), Vector3.new(0, 0, -30) }, { Vector3.new(1.5, 10, 18), Vector3.new(52, 0, -38) },
+} do
+	part({ Name = "RoomWall" .. i, Size = spec[1], Position = spec[2] + Vector3.new(0, 5 + FLOOR_TOP, 0),
+		Color = Color3.fromRGB(70, 66, 62), Material = Enum.Material.Brick })
+end
+
+-- Conduit pipe runs along the perimeter walls.
+for _, spec in {
+	{ Vector3.new(ARENA_SIZE - 8, 1.1, 1.1), Vector3.new(0, 5, ARENA_SIZE / 2 - 2.2) },
+	{ Vector3.new(ARENA_SIZE - 8, 1.1, 1.1), Vector3.new(0, 7.4, ARENA_SIZE / 2 - 2.2) },
+	{ Vector3.new(ARENA_SIZE - 8, 1.1, 1.1), Vector3.new(0, 5, -(ARENA_SIZE / 2 - 2.2)) },
+	{ Vector3.new(1.1, 1.1, ARENA_SIZE - 8), Vector3.new(ARENA_SIZE / 2 - 2.2, 5, 0) },
+	{ Vector3.new(1.1, 1.1, ARENA_SIZE - 8), Vector3.new(-(ARENA_SIZE / 2 - 2.2), 5, 0) },
+	{ Vector3.new(1.1, 1.1, ARENA_SIZE - 8), Vector3.new(-(ARENA_SIZE / 2 - 2.2), 7.4, 0) },
+} do
+	part({ Name = "Pipe", Size = spec[1], Position = spec[2], Color = Color3.fromRGB(80, 74, 60), Material = Enum.Material.Metal })
+end
+
+-- Hanging fluorescent fixtures (the "day shift" lights) and red
+-- emergency lamps on the columns (night). setDay/setNight toggle them.
+local facilityFixtures: { { fixture: Part, light: PointLight } } = {}
+local emergencyFixtures: { { fixture: Part, light: PointLight } } = {}
+for _, pos in {
+	Vector3.new(45, 0, 0), Vector3.new(-45, 0, 0), Vector3.new(0, 0, 45), Vector3.new(0, 0, -45),
+	Vector3.new(45, 0, 45), Vector3.new(45, 0, -45), Vector3.new(-45, 0, 45), Vector3.new(-45, 0, -45),
+	Vector3.new(0, 0, 72), Vector3.new(0, 0, -72), Vector3.new(72, 0, 0), Vector3.new(-72, 0, 0),
+} do
+	local fixtureY = FLOOR_TOP + 15
+	part({ Name = "LightRod", Size = Vector3.new(0.2, WALL_HEIGHT - 15 + 0.5, 0.2),
+		Position = pos + Vector3.new(0, fixtureY + (WALL_HEIGHT - 15 + 0.5) / 2, 0),
+		Color = Color3.fromRGB(40, 40, 40), Material = Enum.Material.Metal, CanCollide = false })
+	local fixture = part({ Name = "LightFixture", Size = Vector3.new(4, 0.35, 1.2),
+		Position = pos + Vector3.new(0, fixtureY, 0),
+		Color = Color3.fromRGB(235, 240, 225), Material = Enum.Material.Neon, CanCollide = false })
+	local light = Instance.new("PointLight")
+	light.Range = 34
+	light.Brightness = 1.3
+	light.Color = Color3.fromRGB(225, 235, 215)
+	light.Shadows = true
+	light.Parent = fixture
+	table.insert(facilityFixtures, { fixture = fixture, light = light })
+end
+for _, pos in { Vector3.new(45, 0, 0), Vector3.new(-45, 0, 0), Vector3.new(0, 0, 45), Vector3.new(0, 0, -45) } do
+	local fixture = part({ Name = "EmergencyLight", Size = Vector3.new(1.4, 0.8, 0.8),
+		Position = pos + Vector3.new(1.8, FLOOR_TOP + 12, 0),
+		Color = Color3.fromRGB(70, 26, 26), Material = Enum.Material.SmoothPlastic, CanCollide = false })
+	local light = Instance.new("PointLight")
+	light.Range = 24
+	light.Brightness = 1.4
+	light.Color = Color3.fromRGB(255, 60, 50)
+	light.Shadows = true
+	light.Enabled = false
+	light.Parent = fixture
+	table.insert(emergencyFixtures, { fixture = fixture, light = light })
 end
 
 -- Central safe-zone lamp
@@ -234,225 +334,113 @@ spawnPoint.Transparency = 1
 spawnPoint.CanCollide = false
 spawnPoint.Parent = arena
 
--- ===================== HAUNTED ENVIRONMENT GENERATOR =====================
--- Fills the void between the safe zone and the generator ring with a dense
--- maze of dead trees, crumbling brick walls, and rusted debris. Blocks
--- line-of-sight everywhere, so stepping out of the light means isolation.
--- Regenerated every match so no one memorizes the maze.
-local hauntedFolder: Folder? = nil
+-- ===================== FACILITY CLUTTER =====================
+-- Crates, barrels, and pallets scattered through the halls — cover and
+-- hiding spots. Reshuffled every match so sightlines never get stale.
+local clutterFolder: Folder? = nil
 
--- Real dead-tree meshes from verified Creator Store authors, loaded at
--- runtime. If any fail to load (asset removed, no network, not trusted
--- for this place), makeTree silently falls back to procedural trees.
-local InsertService = game:GetService("InsertService")
-local TREE_ASSET_IDS = { 3573742671, 4870939709, 14385005411, 15113312104, 101740100427371 }
-local treeTemplates: { Model } = {}
+local GEN_POSITIONS: { Vector3 } = {}
+for i = 1, GENERATOR_COUNT do
+	local angle = (i / GENERATOR_COUNT) * math.pi * 2
+	table.insert(GEN_POSITIONS, Vector3.new(math.cos(angle), 0, math.sin(angle)) * GEN_CIRCLE_RADIUS)
+end
 
-local function collectTreeTemplates(container: Instance)
-	-- Free models can hide scripts — strip every one, and anchor all parts.
-	for _, d in container:GetDescendants() do
-		if d:IsA("LuaSourceContainer") then
-			d:Destroy()
-		elseif d:IsA("BasePart") then
-			d.Anchored = true
+local function clutterSpotFree(pos: Vector3): boolean
+	if pos.Magnitude < SAFE_ZONE_RADIUS + 4 then
+		return false
+	end
+	for _, g in GEN_POSITIONS do
+		if (pos - g).Magnitude < 12 then
+			return false
 		end
 	end
-	local models: { Model } = {}
-	for _, child in container:GetChildren() do
-		if child:IsA("Model") then
-			table.insert(models, child)
-		end
-	end
-	if #models == 0 then
-		-- Loose parts at the top level: wrap them in one model.
-		local wrap = Instance.new("Model")
-		for _, child in container:GetChildren() do
-			if child:IsA("BasePart") then
-				child.Parent = wrap
-			end
-		end
-		if #wrap:GetChildren() > 0 then
-			table.insert(models, wrap)
-		end
-	end
-	for _, model in models do
-		local height = model:GetExtentsSize().Y
-		if height >= 8 and height <= 120 then -- tree-sized, not a baseplate
-			table.insert(treeTemplates, model)
-		end
+	return true
+end
+
+local function makeCrateStack(folder: Folder, rng: Random, pos: Vector3)
+	local baseSize = rng:NextNumber(3.2, 4.2)
+	local yaw = math.rad(rng:NextNumber(0, 360))
+	local crate = Instance.new("Part")
+	crate.Name = "Crate"
+	crate.Size = Vector3.new(baseSize, baseSize, baseSize)
+	crate.CFrame = CFrame.new(pos + Vector3.new(0, FLOOR_TOP + baseSize / 2, 0)) * CFrame.Angles(0, yaw, 0)
+	crate.Anchored = true
+	crate.Material = Enum.Material.WoodPlanks
+	crate.Color = Color3.fromRGB(96, 78, 56)
+	crate.Parent = folder
+	if rng:NextNumber() > 0.45 then
+		local topSize = baseSize * rng:NextNumber(0.7, 0.95)
+		local top = crate:Clone()
+		top.Size = Vector3.new(topSize, topSize, topSize)
+		top.CFrame = CFrame.new(pos + Vector3.new(rng:NextNumber(-0.5, 0.5), FLOOR_TOP + baseSize + topSize / 2, rng:NextNumber(-0.5, 0.5)))
+			* CFrame.Angles(0, yaw + math.rad(rng:NextNumber(-30, 30)), 0)
+		top.Parent = folder
 	end
 end
 
-task.spawn(function()
-	for _, assetId in TREE_ASSET_IDS do
-		local ok, asset = pcall(function()
-			return InsertService:LoadAsset(assetId)
-		end)
-		if ok and asset then
-			collectTreeTemplates(asset)
+local function makeBarrelGroup(folder: Folder, rng: Random, pos: Vector3)
+	for b = 1, rng:NextInteger(1, 3) do
+		local offset = Vector3.new(rng:NextNumber(-3, 3), 0, rng:NextNumber(-3, 3))
+		local barrel = Instance.new("Part")
+		barrel.Name = "Barrel"
+		barrel.Shape = Enum.PartType.Cylinder
+		barrel.Size = Vector3.new(3.4, 2.6, 2.6)
+		if rng:NextNumber() > 0.75 then
+			-- Tipped over (cylinder axis is X, so this is lying down).
+			barrel.CFrame = CFrame.new(pos + offset + Vector3.new(0, FLOOR_TOP + 1.3, 0))
+				* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0)
+		else
+			barrel.CFrame = CFrame.new(pos + offset + Vector3.new(0, FLOOR_TOP + 1.7, 0))
+				* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), math.rad(90))
 		end
-	end
-end)
-
--- Fallback dead tree: leaning cylindrical trunk plus gnarled branches.
-local function makeProceduralTree(folder: Folder, random: Random, pos: Vector3)
-	local height = random:NextNumber(16, 30)
-	local trunkWidth = random:NextNumber(1.6, 3.2)
-	local yaw = math.rad(random:NextNumber(0, 360))
-	local lean = math.rad(random:NextNumber(-6, 6))
-	local trunk = Instance.new("Part")
-	trunk.Name = "GnarledTree"
-	trunk.Shape = Enum.PartType.Cylinder
-	trunk.Size = Vector3.new(height, trunkWidth, trunkWidth)
-	trunk.CFrame = CFrame.new(pos + Vector3.new(0, height / 2, 0))
-		* CFrame.Angles(0, yaw, math.rad(90) + lean)
-	trunk.Anchored = true
-	trunk.Material = Enum.Material.Wood
-	trunk.Color = Color3.fromRGB(52, 41, 33)
-	trunk.Parent = folder
-	for _ = 1, random:NextInteger(2, 4) do
-		local branchLen = random:NextNumber(5, 10)
-		local branchWidth = math.max(0.6, trunkWidth * 0.4)
-		local branch = Instance.new("Part")
-		branch.Name = "Branch"
-		branch.Shape = Enum.PartType.Cylinder
-		branch.Size = Vector3.new(branchLen, branchWidth, branchWidth)
-		branch.CFrame = CFrame.new(pos + Vector3.new(0, height * random:NextNumber(0.45, 0.9), 0))
-			* CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), math.rad(random:NextNumber(15, 55)))
-			* CFrame.new(branchLen / 2, 0, 0)
-		branch.Anchored = true
-		branch.CanCollide = false
-		branch.Material = Enum.Material.Wood
-		branch.Color = Color3.fromRGB(45, 35, 28)
-		branch.Parent = folder
+		barrel.Anchored = true
+		barrel.Material = Enum.Material.CorrodedMetal
+		barrel.Color = Color3.fromRGB(110, 62, 40)
+		barrel.Parent = folder
 	end
 end
 
-local function makeTree(folder: Folder, random: Random, pos: Vector3)
-	if #treeTemplates == 0 then
-		makeProceduralTree(folder, random, pos)
-		return
-	end
-	local template = treeTemplates[random:NextInteger(1, #treeTemplates)]
-	local tree = template:Clone()
-	local currentHeight = tree:GetExtentsSize().Y
-	if currentHeight > 1 then
-		pcall(function()
-			tree:ScaleTo(random:NextNumber(18, 32) / currentHeight)
-		end)
-	end
-	tree:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), 0))
-	-- Plant the trunk: drop the model so its bounding box sits in the mud.
-	local bbCF, bbSize = tree:GetBoundingBox()
-	local bottom = bbCF.Position.Y - bbSize.Y / 2
-	tree:PivotTo(tree:GetPivot() + Vector3.new(0, -bottom - 0.5, 0))
-	tree.Parent = folder
+local function makePallet(folder: Folder, rng: Random, pos: Vector3)
+	local pallet = Instance.new("Part")
+	pallet.Name = "Pallet"
+	pallet.Size = Vector3.new(4.4, 0.4, 4.4)
+	pallet.CFrame = CFrame.new(pos + Vector3.new(0, FLOOR_TOP + 0.2, 0))
+		* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0)
+	pallet.Anchored = true
+	pallet.Material = Enum.Material.WoodPlanks
+	pallet.Color = Color3.fromRGB(88, 72, 52)
+	pallet.Parent = folder
 end
 
--- A crumbling brick wall: 2-3 segments of uneven height, like real ruins.
-local function makeRuinedWall(folder: Folder, random: Random, pos: Vector3)
-	local width = random:NextNumber(12, 22)
-	local height = random:NextNumber(6, 11)
-	local base = CFrame.new(pos) * CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), 0)
-	local segments = random:NextInteger(2, 3)
-	local xOffset = -width / 2
-	for _ = 1, segments do
-		local segWidth = (width / segments) * random:NextNumber(0.75, 1)
-		local segHeight = height * random:NextNumber(0.55, 1)
-		local seg = Instance.new("Part")
-		seg.Name = "RuinedWall"
-		seg.Size = Vector3.new(segWidth, segHeight, 2.4)
-		seg.CFrame = base * CFrame.new(xOffset + segWidth / 2, segHeight / 2, 0)
-		seg.Anchored = true
-		seg.Material = Enum.Material.Brick
-		seg.Color = Color3.fromRGB(72, 62, 58)
-		seg.Parent = folder
-		xOffset += width / segments
-	end
-end
-
--- A rusty corrugated shelter with a collapsed, leaning roof sheet.
-local function makeDebris(folder: Folder, random: Random, pos: Vector3)
-	local base = CFrame.new(pos) * CFrame.Angles(0, math.rad(random:NextNumber(0, 360)), 0)
-	local wallHeight = random:NextNumber(7, 11)
-	local junk = Instance.new("Part")
-	junk.Name = "TownDebris"
-	junk.Size = Vector3.new(8, wallHeight, 0.8)
-	junk.CFrame = base * CFrame.new(0, wallHeight / 2, 0)
-	junk.Anchored = true
-	junk.Material = Enum.Material.CorrodedMetal
-	junk.Color = Color3.fromRGB(74, 46, 38)
-	junk.Parent = folder
-	local roof = Instance.new("Part")
-	roof.Name = "DebrisRoof"
-	roof.Size = Vector3.new(8, 0.6, random:NextNumber(6, 9))
-	roof.CFrame = base * CFrame.new(0, wallHeight, roof.Size.Z / 2 - 0.4)
-		* CFrame.Angles(math.rad(random:NextNumber(-28, -12)), 0, 0)
-	roof.Anchored = true
-	roof.Material = Enum.Material.CorrodedMetal
-	roof.Color = Color3.fromRGB(60, 40, 34)
-	roof.Parent = folder
-end
-
--- A mossy boulder, half-buried in the mud.
-local function makeBoulder(folder: Folder, random: Random, pos: Vector3)
-	local size = random:NextNumber(2, 6)
-	local rock = Instance.new("Part")
-	rock.Name = "Boulder"
-	rock.Size = Vector3.new(size * random:NextNumber(0.8, 1.4), size, size * random:NextNumber(0.8, 1.4))
-	rock.CFrame = CFrame.new(pos + Vector3.new(0, size * 0.25, 0))
-		* CFrame.Angles(math.rad(random:NextNumber(0, 360)), math.rad(random:NextNumber(0, 360)), math.rad(random:NextNumber(0, 360)))
-	rock.Anchored = true
-	rock.CanCollide = size > 3.5
-	rock.Material = Enum.Material.Rock
-	rock.Color = Color3.fromRGB(68, 74, 66)
-	rock.Parent = folder
-end
-
-local function generateHauntedMap()
-	if hauntedFolder then
-		hauntedFolder:Destroy()
+local function generateClutter()
+	if clutterFolder then
+		clutterFolder:Destroy()
 	end
 	local folder = Instance.new("Folder")
-	folder.Name = "HauntedMap"
+	folder.Name = "FacilityClutter"
 	folder.Parent = arena
-	hauntedFolder = folder
+	clutterFolder = folder
 
-	local random = Random.new()
-	for _ = 1, HAUNTED_OBSTACLE_COUNT do
-		-- Pick a random spot on the map grid.
-		local x = random:NextNumber(-90, 90)
-		local z = random:NextNumber(-90, 90)
-		local pos = ARENA_CENTER + Vector3.new(x, 0, z)
-
-		-- Don't spawn obstacles on the safe zone or the generator ring.
-		if pos.Magnitude > SAFE_ZONE_RADIUS + 2 and pos.Magnitude < GEN_CIRCLE_RADIUS - 12 then
-			local choice = random:NextInteger(1, 3)
+	local rng = Random.new()
+	for _ = 1, 55 do
+		local pos = Vector3.new(rng:NextNumber(-82, 82), 0, rng:NextNumber(-82, 82))
+		if clutterSpotFree(pos) then
+			local choice = rng:NextInteger(1, 3)
 			if choice == 1 then
-				makeTree(folder, random, pos)
+				makeCrateStack(folder, rng, pos)
 			elseif choice == 2 then
-				makeRuinedWall(folder, random, pos)
+				makeBarrelGroup(folder, rng, pos)
 			else
-				makeDebris(folder, random, pos)
+				makePallet(folder, rng, pos)
 			end
 		end
 	end
-
-	-- Boulders scatter the whole arena, including outside the generator ring.
-	for _ = 1, 45 do
-		local x = random:NextNumber(-ARENA_SIZE / 2 + 8, ARENA_SIZE / 2 - 8)
-		local z = random:NextNumber(-ARENA_SIZE / 2 + 8, ARENA_SIZE / 2 - 8)
-		local pos = ARENA_CENTER + Vector3.new(x, 0, z)
-		if pos.Magnitude > SAFE_ZONE_RADIUS + 2 then
-			makeBoulder(folder, random, pos)
-		end
-	end
 end
-pcall(generateHauntedMap) -- cosmetic: a scenery error must not stop the game
+pcall(generateClutter) -- cosmetic: a scenery error must not stop the game
 
 -- ===================== AMBIENT VFX =====================
--- Rolling ground mist and drifting fireflies, using textures that ship
--- with the Roblox client (rbxasset://) so nothing needs the catalog.
+-- Dust hanging in the air of the derelict hall, using a texture that
+-- ships with the Roblox client (rbxasset://) so nothing needs the catalog.
 local function makeEmitterAnchor(name: string, pos: Vector3): Part
 	local anchor = Instance.new("Part")
 	anchor.Name = name
@@ -469,46 +457,25 @@ pcall(function()
 	local rng = Random.new(11)
 	for i = 1, 10 do
 		local angle = (i / 10) * math.pi * 2
-		local radius = rng:NextNumber(20, ARENA_SIZE / 2 - 20)
-		local anchor = makeEmitterAnchor("MistEmitter", Vector3.new(math.cos(angle) * radius, 2.5, math.sin(angle) * radius))
-		local mist = Instance.new("ParticleEmitter")
-		mist.Texture = "rbxasset://textures/particles/smoke_main.dds"
-		mist.Size = NumberSequence.new(rng:NextNumber(14, 20), rng:NextNumber(20, 26))
-		mist.Transparency = NumberSequence.new({
+		local radius = rng:NextNumber(20, ARENA_SIZE / 2 - 16)
+		local anchor = makeEmitterAnchor("DustEmitter", Vector3.new(math.cos(angle) * radius, 7, math.sin(angle) * radius))
+		local dust = Instance.new("ParticleEmitter")
+		dust.Texture = "rbxasset://textures/particles/smoke_main.dds"
+		dust.Size = NumberSequence.new(rng:NextNumber(6, 9), rng:NextNumber(10, 14))
+		dust.Transparency = NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(0.3, 0.72),
+			NumberSequenceKeypoint.new(0.3, 0.84),
 			NumberSequenceKeypoint.new(1, 1),
 		})
-		mist.Color = ColorSequence.new(Color3.fromRGB(160, 170, 175))
-		mist.Lifetime = NumberRange.new(6, 11)
-		mist.Rate = 2
-		mist.Speed = NumberRange.new(0.4, 1.2)
-		mist.SpreadAngle = Vector2.new(180, 15)
-		mist.Rotation = NumberRange.new(0, 360)
-		mist.RotSpeed = NumberRange.new(-4, 4)
-		mist.LightInfluence = 1
-		mist.Parent = anchor
-	end
-	for _ = 1, 6 do
-		local anchor = makeEmitterAnchor("FireflyEmitter",
-			Vector3.new(rng:NextNumber(-70, 70), rng:NextNumber(3, 6), rng:NextNumber(-70, 70)))
-		local flies = Instance.new("ParticleEmitter")
-		flies.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		flies.Size = NumberSequence.new(0.25)
-		flies.Color = ColorSequence.new(Color3.fromRGB(180, 220, 120))
-		flies.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(0.2, 0.2),
-			NumberSequenceKeypoint.new(0.8, 0.3),
-			NumberSequenceKeypoint.new(1, 1),
-		})
-		flies.Lifetime = NumberRange.new(4, 8)
-		flies.Rate = 3
-		flies.Speed = NumberRange.new(0.3, 0.9)
-		flies.SpreadAngle = Vector2.new(180, 180)
-		flies.LightEmission = 1
-		flies.LightInfluence = 0
-		flies.Parent = anchor
+		dust.Color = ColorSequence.new(Color3.fromRGB(150, 150, 148))
+		dust.Lifetime = NumberRange.new(8, 14)
+		dust.Rate = 1.5
+		dust.Speed = NumberRange.new(0.2, 0.7)
+		dust.SpreadAngle = Vector2.new(180, 40)
+		dust.Rotation = NumberRange.new(0, 360)
+		dust.RotSpeed = NumberRange.new(-3, 3)
+		dust.LightInfluence = 1
+		dust.Parent = anchor
 	end
 end)
 
@@ -675,54 +642,65 @@ depthOfField.FarIntensity = 0.3
 depthOfField.Parent = Lighting
 
 local sunRays = Instance.new("SunRaysEffect")
-sunRays.Intensity = 0.1
+sunRays.Intensity = 0.06
 sunRays.Spread = 0.6
 sunRays.Parent = Lighting
 
-local clouds = Instance.new("Clouds")
-clouds.Parent = terrain
-
 -- ===================== LIGHTING =====================
 local function setDay()
-	-- Overcast woodland afternoon: soft light, thin haze, drifting clouds.
+	-- Day shift: the old fluorescents hum along, dusty grey light.
 	Lighting.ClockTime = 13
-	Lighting.Ambient = Color3.fromRGB(70, 72, 70)
-	Lighting.OutdoorAmbient = Color3.fromRGB(96, 100, 96)
-	atmosphere.Density = 0.32
-	atmosphere.Offset = 0.25
-	atmosphere.Color = Color3.fromRGB(199, 199, 190)
-	atmosphere.Decay = Color3.fromRGB(106, 112, 125)
-	atmosphere.Haze = 1.8
-	atmosphere.Glare = 0.3
-	colorGrade.Saturation = -0.12
-	colorGrade.Contrast = 0.05
-	colorGrade.TintColor = Color3.fromRGB(255, 250, 240)
-	sunRays.Intensity = 0.12
-	clouds.Cover = 0.65
-	clouds.Density = 0.25
-	clouds.Color = Color3.fromRGB(210, 210, 215)
+	Lighting.Ambient = Color3.fromRGB(56, 56, 58)
+	Lighting.OutdoorAmbient = Color3.fromRGB(74, 74, 78)
+	atmosphere.Density = 0.3
+	atmosphere.Offset = 0.2
+	atmosphere.Color = Color3.fromRGB(180, 178, 170)
+	atmosphere.Decay = Color3.fromRGB(96, 98, 104)
+	atmosphere.Haze = 1.6
+	atmosphere.Glare = 0.1
+	colorGrade.Saturation = -0.18
+	colorGrade.Contrast = 0.06
+	colorGrade.TintColor = Color3.fromRGB(252, 250, 242)
+	sunRays.Intensity = 0.06
+	for _, f in facilityFixtures do
+		f.fixture.Material = Enum.Material.Neon
+		f.fixture.Color = Color3.fromRGB(235, 240, 225)
+		f.light.Enabled = true
+	end
+	for _, e in emergencyFixtures do
+		e.fixture.Material = Enum.Material.SmoothPlastic
+		e.fixture.Color = Color3.fromRGB(70, 26, 26)
+		e.light.Enabled = false
+	end
 	if ambientNightSound.IsPlaying then ambientNightSound:Stop() end
 	if not ambientDaySound.IsPlaying then ambientDaySound:Play() end
 end
 
 local function setNight()
-	-- Dead by Daylight midnight: pitch black, shrouded in dense cold mist.
+	-- Power's down: pitch-black halls, red emergency lamps, thick dust.
 	Lighting.ClockTime = 0
 	Lighting.Ambient = Color3.fromRGB(0, 0, 0)
-	Lighting.OutdoorAmbient = Color3.fromRGB(15, 15, 20)
-	atmosphere.Density = 0.55 -- the treeline dissolves into the murk
+	Lighting.OutdoorAmbient = Color3.fromRGB(10, 10, 14)
+	atmosphere.Density = 0.42
 	atmosphere.Offset = 0
-	atmosphere.Color = Color3.fromRGB(31, 36, 38)
-	atmosphere.Decay = Color3.fromRGB(12, 14, 18)
-	atmosphere.Haze = 3
+	atmosphere.Color = Color3.fromRGB(28, 30, 34)
+	atmosphere.Decay = Color3.fromRGB(10, 12, 16)
+	atmosphere.Haze = 2.6
 	atmosphere.Glare = 0
-	colorGrade.Saturation = -0.4
-	colorGrade.Contrast = 0.15
-	colorGrade.TintColor = Color3.fromRGB(205, 215, 235)
+	colorGrade.Saturation = -0.42
+	colorGrade.Contrast = 0.16
+	colorGrade.TintColor = Color3.fromRGB(205, 212, 232)
 	sunRays.Intensity = 0
-	clouds.Cover = 0.85
-	clouds.Density = 0.4
-	clouds.Color = Color3.fromRGB(25, 28, 34)
+	for _, f in facilityFixtures do
+		f.fixture.Material = Enum.Material.Metal
+		f.fixture.Color = Color3.fromRGB(70, 72, 68)
+		f.light.Enabled = false
+	end
+	for _, e in emergencyFixtures do
+		e.fixture.Material = Enum.Material.Neon
+		e.fixture.Color = Color3.fromRGB(255, 40, 40)
+		e.light.Enabled = true
+	end
 	if ambientDaySound.IsPlaying then ambientDaySound:Stop() end
 	if not ambientNightSound.IsPlaying then ambientNightSound:Play() end
 end
@@ -1141,8 +1119,8 @@ local function runMatch()
 		updateGeneratorVisual(g)
 	end
 
-	-- Fresh haunted maze every match.
-	pcall(generateHauntedMap)
+	-- Reshuffle the clutter every match.
+	pcall(generateClutter)
 
 	for _, c in roster do
 		c.player:LoadCharacter()
