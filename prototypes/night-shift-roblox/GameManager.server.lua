@@ -18,6 +18,9 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
+local GAME_VERSION = "0.4.0"
+print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
+
 Players.CharacterAutoLoads = false
 
 -- ===================== SOUND ASSETS =====================
@@ -165,9 +168,10 @@ end
 -- Real terrain (not a flat part) picks up Future-phase lighting, and
 -- Decoration = true grows animated grass blades on the Grass material.
 local terrain = Workspace.Terrain
-terrain.Decoration = true
-terrain:FillBlock(CFrame.new(0, -2.5, 0), Vector3.new(ARENA_SIZE + 24, 7, ARENA_SIZE + 24), Enum.Material.Mud)
-do
+-- Cosmetic-only, so pcall-guarded: scenery must never kill the game loop.
+pcall(function()
+	terrain.Decoration = true
+	terrain:FillBlock(CFrame.new(0, -2.5, 0), Vector3.new(ARENA_SIZE + 24, 7, ARENA_SIZE + 24), Enum.Material.Mud)
 	local random = Random.new(7) -- fixed seed: ground stays stable across matches
 	for _ = 1, 140 do
 		local x = random:NextNumber(-ARENA_SIZE / 2, ARENA_SIZE / 2)
@@ -177,7 +181,7 @@ do
 	end
 	-- Trampled leaf litter around the safe-zone lamp.
 	terrain:FillBlock(CFrame.new(0, -1, 0), Vector3.new(SAFE_ZONE_RADIUS * 2.4, 4, SAFE_ZONE_RADIUS * 2.4), Enum.Material.LeafyGrass)
-end
+end)
 for _, w in {
 	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, ARENA_SIZE / 2) },
 	{ Vector3.new(ARENA_SIZE, 14, 2), Vector3.new(0, 7, -ARENA_SIZE / 2) },
@@ -444,7 +448,7 @@ local function generateHauntedMap()
 		end
 	end
 end
-generateHauntedMap()
+pcall(generateHauntedMap) -- cosmetic: a scenery error must not stop the game
 
 -- ===================== AMBIENT VFX =====================
 -- Rolling ground mist and drifting fireflies, using textures that ship
@@ -461,7 +465,7 @@ local function makeEmitterAnchor(name: string, pos: Vector3): Part
 	return anchor
 end
 
-do
+pcall(function()
 	local rng = Random.new(11)
 	for i = 1, 10 do
 		local angle = (i / 10) * math.pi * 2
@@ -506,7 +510,7 @@ do
 		flies.LightInfluence = 0
 		flies.Parent = anchor
 	end
-end
+end)
 
 -- ===================== AMBIENT SOUND =====================
 local ambientDaySound = makeSound({
@@ -1138,7 +1142,7 @@ local function runMatch()
 	end
 
 	-- Fresh haunted maze every match.
-	generateHauntedMap()
+	pcall(generateHauntedMap)
 
 	for _, c in roster do
 		c.player:LoadCharacter()
@@ -1257,21 +1261,51 @@ local function runMatch()
 	end
 end
 
--- ===================== PLAYER LIFECYCLE =====================
-Players.PlayerAdded:Connect(function(player)
-	player:LoadCharacter()
-	if matchActive then
-		Toast:FireClient(player, "A match is in progress — you'll join the next one.")
-	end
-end)
+-- ===================== FORCE START (/start) =====================
+local forceStartRequested = false
 
--- CharacterAutoLoads is off, so spawn anyone who joined before this
--- script connected PlayerAdded (always the case in solo Studio tests —
--- without this, "Test" drops you into an empty void).
-for _, player in Players:GetPlayers() do
+local function isOwner(player: Player): boolean
+	if RunService:IsStudio() then
+		return true
+	end
+	return game.CreatorType == Enum.CreatorType.User and player.UserId == game.CreatorId
+end
+
+local function hookChat(player: Player)
+	player.Chatted:Connect(function(message)
+		local msg = string.lower(message)
+		if msg ~= "/start" and msg ~= "/forcestart" then
+			return
+		end
+		if phase ~= "lobby" then
+			Toast:FireClient(player, "A match is already running.")
+		elseif isOwner(player) then
+			forceStartRequested = true
+			Feed:FireAllClients("⚡ " .. player.Name .. " force-started the night shift!")
+		else
+			Toast:FireClient(player, "Only the owner can force start.")
+		end
+	end)
+end
+
+-- ===================== PLAYER LIFECYCLE =====================
+local function onPlayerAdded(player: Player)
+	hookChat(player)
 	if not player.Character then
 		player:LoadCharacter()
 	end
+	if matchActive then
+		Toast:FireClient(player, "A match is in progress — you'll join the next one.")
+	end
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+
+-- CharacterAutoLoads is off, so handle anyone who joined before this
+-- script connected PlayerAdded (always the case in solo Studio tests —
+-- without this, "Test" drops you into an empty void).
+for _, player in Players:GetPlayers() do
+	onPlayerAdded(player)
 end
 
 Players.PlayerRemoving:Connect(function(player)
@@ -1286,17 +1320,26 @@ end)
 
 -- ===================== MAIN LOOP =====================
 task.spawn(function()
+	local lobbySilentSeconds = 0
 	while true do
 		if phase == "lobby" then
 			local count = #Players:GetPlayers()
 			syncAll()
-			if count >= MIN_PLAYERS then
+			if count >= MIN_PLAYERS or (forceStartRequested and count >= 1) then
+				forceStartRequested = false
+				lobbySilentSeconds = 0
 				for i = LOBBY_COUNTDOWN, 1, -1 do
 					Feed:FireAllClients("Night shift starts in " .. i .. "…")
 					task.wait(1)
 				end
 				runMatch()
 			else
+				-- Never leave the lobby silent: say what we're waiting for.
+				lobbySilentSeconds += 1
+				if lobbySilentSeconds >= 10 then
+					lobbySilentSeconds = 0
+					Feed:FireAllClients(("⌛ Waiting for players (%d/%d)… the owner can chat /start to begin now."):format(count, MIN_PLAYERS))
+				end
 				task.wait(1)
 			end
 		else
@@ -1304,3 +1347,5 @@ task.spawn(function()
 		end
 	end
 end)
+
+print("[NightShift] GameManager " .. GAME_VERSION .. " ready — lobby open. If you don't see this line in Output, you're running an old version of the place.")
