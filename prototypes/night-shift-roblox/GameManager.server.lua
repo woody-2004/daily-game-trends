@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "1.0.1-phase1"
+local GAME_VERSION = "1.1.0-phase1"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -62,7 +62,7 @@ end
 local IMPORTED_ASSETS = {
 	villain = 89840865172931, -- "mop" -> becomes The Watcher
 	flashlight = 94078352716367, -- "flash light"
-	terrainGround = 89317303583763, -- "terrain" -> the actual floor of the map
+	terrainGround = 0, -- "terrain" mesh disabled: Phase 1 ground is the hand-built crater/ridge voxel design (was 89317303583763)
 	environments = {
 		-- YOUR assets ARE the map. The same asset is cloned into several
 		-- zones with different footprints and rotations, so every
@@ -301,11 +301,12 @@ print("[NightShift] map: terrain…")
 -- failure can never drop players into the void. Tiled 2x2 because a
 -- single Part cannot exceed 2048 studs on an axis.
 do
+	-- Below the crater floor (-16), so the basin stays hollow; these are
+	-- pure fall-catchers and deliberately NOT in the groundY whitelist.
 	local tile = WORLD_SIZE / 2 + 12
 	for _, corner in { Vector3.new(-1, 0, -1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, 1), Vector3.new(1, 0, 1) } do
-		local slab = part({ Name = "SafetyFloor", Size = Vector3.new(tile, 2, tile),
-			Position = Vector3.new(corner.X * tile / 2, -0.2, corner.Z * tile / 2), Transparency = 1 })
-		addGroundInstance(slab)
+		part({ Name = "SafetyFloor", Size = Vector3.new(tile, 2, tile),
+			Position = Vector3.new(corner.X * tile / 2, -18, corner.Z * tile / 2), Transparency = 1 })
 	end
 end
 
@@ -344,15 +345,23 @@ end)
 -- keep their scenery off the paths.
 local ROAD_SEGMENTS: { { Vector3 } } = {}
 
+-- Scorched gravel arteries: inclined rock strips that follow the ground
+-- (sampling height at both ends), so the same code that draws a flat
+-- road also draws the ramps descending into the central crater. Each
+-- strip also carves the air above it, cutting a walkable trench wherever
+-- a road passes through a ridge bank.
 local function roadStrip(a: Vector3, b: Vector3)
-	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
-	if delta.Magnitude < 1 then
+	local flat = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	if flat.Magnitude < 1 then
 		return
 	end
-	local mid = (a + b) / 2
-	local yaw = math.atan2(delta.X, delta.Z)
-	terrain:FillBlock(CFrame.new(mid.X, 0.7, mid.Z) * CFrame.Angles(0, yaw, 0),
-		Vector3.new(7, 2.2, delta.Magnitude + 6), Enum.Material.Mud)
+	local from = Vector3.new(a.X, groundY(a.X, a.Z), a.Z)
+	local to = Vector3.new(b.X, groundY(b.X, b.Z), b.Z)
+	local len = (to - from).Magnitude
+	local mid = (from + to) / 2
+	local cf = CFrame.lookAt(mid, to)
+	terrain:FillBlock(cf * CFrame.new(0, -0.3, 0), Vector3.new(7, 2.4, len + 4), Enum.Material.Rock)
+	terrain:FillBlock(cf * CFrame.new(0, 4.8, 0), Vector3.new(8, 7.5, len + 2), Enum.Material.Air)
 	table.insert(ROAD_SEGMENTS, { a, b })
 end
 
@@ -374,40 +383,80 @@ local function curvedRoad(a: Vector3, b: Vector3, bend: number)
 	end
 end
 
--- Always runs immediately (fast native terrain ops, no asset loads):
--- base ground, rolling hills everywhere (not just the corners), mixed
--- materials, roads, generator flattening, swamp, creek. This is the
--- floor the game is instantly playable on.
+-- Always runs immediately (fast native terrain ops, no asset loads).
+-- The trial ground, per the design brief: a sunken central crater, a
+-- serpentine maze of ridge waves and trench corridors, blind horseshoe
+-- alcoves cupping every generator, gravel arteries, withered grass on
+-- the crests, and an unclimbable slate bluff rimming the whole site.
 pcall(function()
-	-- The full 2068 x 2068 base slab. Voxel terrain handles this in one
-	-- bulk fill; the ground genuinely reaches the horizon.
-	terrain:FillBlock(CFrame.new(0, -19, 0), Vector3.new(WORLD_SIZE, 40, WORLD_SIZE), Enum.Material.Ground)
+	-- Palette: waterlogged olive-black mud, ash-grey gravel, straw-dead
+	-- grass, dark slate. Material colors are global to the place.
+	pcall(function()
+		terrain:SetMaterialColor(Enum.Material.Mud, Color3.fromRGB(28, 30, 26))
+		terrain:SetMaterialColor(Enum.Material.Ground, Color3.fromRGB(48, 42, 34))
+		terrain:SetMaterialColor(Enum.Material.Grass, Color3.fromRGB(106, 94, 56))
+		terrain:SetMaterialColor(Enum.Material.LeafyGrass, Color3.fromRGB(96, 84, 50))
+		terrain:SetMaterialColor(Enum.Material.Rock, Color3.fromRGB(96, 98, 100))
+		terrain:SetMaterialColor(Enum.Material.Slate, Color3.fromRGB(58, 60, 62))
+		terrain:SetMaterialColor(Enum.Material.Basalt, Color3.fromRGB(24, 24, 26))
+	end)
+
+	-- The full 2068 x 2068 base slab: choked, wet mud.
+	terrain:FillBlock(CFrame.new(0, -19, 0), Vector3.new(WORLD_SIZE, 40, WORLD_SIZE), Enum.Material.Mud)
 
 	local rng = Random.new(7)
 	local worldHalf = WORLD_SIZE / 2 - 12
 
-	-- Continuous rolling hills inside the playable core: many
-	-- overlapping, shallow mounds so the ground undulates everywhere
-	-- you walk, the way real terrain does.
-	for _ = 1, 46 do
-		local x = rng:NextNumber(-125, 125)
-		local z = rng:NextNumber(-125, 125)
-		local r = rng:NextNumber(14, 30)
-		terrain:FillBall(Vector3.new(x, 1 - r * rng:NextNumber(0.45, 0.62), z), r, Enum.Material.Ground)
+	local function nearGenSite(x: number, z: number): boolean
+		for _, g in GEN_POSITIONS do
+			if (Vector3.new(x, 0, z) - g).Magnitude < 20 then
+				return true
+			end
+		end
+		return false
 	end
-	-- Wilderness beyond the core: hundreds of hills across the whole
-	-- 2068 expanse, growing larger and taller toward the far edges so
-	-- the horizon reads as ridgelines, not a flat plain.
+
+	-- THE TRENCHES AND WINDING RIDGES: serpentine waves of mud banks,
+	-- 10-18 studs high, weaving between the crater rim and the bluff.
+	-- The gaps between them are the trench corridors players travel.
+	local ridgeCrests: { { number } } = {}
+	for _ = 1, 9 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local dist = rng:NextNumber(62, 105)
+		local x, z = math.cos(angle) * dist, math.sin(angle) * dist
+		local heading = rng:NextNumber(0, math.pi * 2)
+		for _ = 1, rng:NextInteger(12, 20) do
+			local fromCenter = math.sqrt(x * x + z * z)
+			if fromCenter > 64 and fromCenter < 122 and not nearGenSite(x, z) then
+				local r = rng:NextNumber(7, 11)
+				local poke = rng:NextNumber(9, 16)
+				terrain:FillBall(Vector3.new(x, 1 + poke - r, z), r, Enum.Material.Mud)
+				table.insert(ridgeCrests, { x, z, r, 1 + poke })
+			end
+			heading += rng:NextNumber(-0.55, 0.55)
+			x += math.cos(heading) * 7
+			z += math.sin(heading) * 7
+		end
+	end
+	-- Withered, straw-brown thatch draped over the ridge crests.
+	for _, rb in ridgeCrests do
+		if rng:NextNumber() > 0.5 then
+			terrain:FillBlock(CFrame.new(rb[1], rb[4] - 0.6, rb[2]) * CFrame.Angles(0, rng:NextNumber(0, math.pi), 0),
+				Vector3.new(rb[3] * 2.2, 2.2, rb[3] * 1.6), Enum.Material.Grass)
+		end
+	end
+
+	-- Wilderness beyond the bluff: hills growing toward the far edges,
+	-- ridgelines rimming the outer third, ponds, cover, rock outcrops.
 	for _ = 1, 380 do
 		local x = rng:NextNumber(-worldHalf, worldHalf)
 		local z = rng:NextNumber(-worldHalf, worldHalf)
 		local distFromCore = math.max(math.abs(x), math.abs(z))
-		if distFromCore > 140 then
+		if distFromCore > 165 then
 			local r = rng:NextNumber(16, 34) + (distFromCore / worldHalf) * 26
 			terrain:FillBall(Vector3.new(x, 1 - r * rng:NextNumber(0.42, 0.6), z), r, Enum.Material.Ground)
 		end
 	end
-	-- Far ridgelines: big overlapping mounds rimming the outer third.
 	for _ = 1, 40 do
 		local angle = rng:NextNumber(0, math.pi * 2)
 		local radius = rng:NextNumber(worldHalf * 0.62, worldHalf * 0.95)
@@ -415,75 +464,89 @@ pcall(function()
 		terrain:FillBall(Vector3.new(math.cos(angle) * radius, 1 - r * rng:NextNumber(0.4, 0.55), math.sin(angle) * radius),
 			r, Enum.Material.Ground)
 	end
-	-- Wilderness ponds and marshes, scattered outside the playable core.
 	for _ = 1, 10 do
 		local x = rng:NextNumber(-worldHalf * 0.85, worldHalf * 0.85)
 		local z = rng:NextNumber(-worldHalf * 0.85, worldHalf * 0.85)
-		if math.max(math.abs(x), math.abs(z)) > 180 then
+		if math.max(math.abs(x), math.abs(z)) > 200 then
 			local w = rng:NextNumber(30, 70)
 			terrain:FillBlock(CFrame.new(x, -0.4, z), Vector3.new(w * 1.3, 3, w), Enum.Material.Mud)
 			terrain:FillBlock(CFrame.new(x, 0.7, z), Vector3.new(w, 0.9, w * 0.72), Enum.Material.Water)
 		end
 	end
-	-- Dirt berms: subtle interior rises that break sightlines at
-	-- ground level even where nothing else is built yet.
-	for _, b in {
-		{ 32, -28, 10 }, { -42, 48, 9 }, { 58, 82, 10 }, { 42, -20, 9 },
-		{ -55, 58, 9 }, { 30, 12, 8 }, { 14, 58, 8 }, { -15, -40, 9 }, { -45, -25, 9 },
-	} do
-		terrain:FillBall(Vector3.new(b[1], 1 - b[3] * 0.55, b[2]), b[3], Enum.Material.Ground)
-	end
-
-	-- Ground cover variety: base Grass, overgrown LeafyGrass patches
-	-- (taller, decorated blades — the "tall grass" look), bare dirt
-	-- clearings, and mossy rock outcrops. Dense detail in the playable
-	-- core, then the same treatment sweeping across all 2068 studs.
-	local function coverPatch(x: number, z: number, minSize: number, maxSize: number)
-		local mat = Enum.Material.Grass
-		local roll = rng:NextNumber()
-		if roll > 0.62 then
-			mat = Enum.Material.LeafyGrass
-		elseif roll > 0.5 then
-			mat = Enum.Material.Ground
-		end
-		terrain:FillBlock(CFrame.new(x, -0.9, z) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
-			Vector3.new(rng:NextNumber(minSize, maxSize), 4, rng:NextNumber(minSize, maxSize)), mat)
-	end
-	for _ = 1, 90 do
-		coverPatch(rng:NextNumber(-118, 118), rng:NextNumber(-118, 118), 10, 26)
-	end
 	for _ = 1, 420 do
-		coverPatch(rng:NextNumber(-worldHalf, worldHalf), rng:NextNumber(-worldHalf, worldHalf), 18, 46)
-	end
-	for _ = 1, 10 do
-		terrain:FillBall(Vector3.new(rng:NextNumber(-110, 110), rng:NextNumber(2, 8), rng:NextNumber(-110, 110)),
-			rng:NextNumber(6, 11), Enum.Material.Rock)
+		local x = rng:NextNumber(-worldHalf, worldHalf)
+		local z = rng:NextNumber(-worldHalf, worldHalf)
+		if math.max(math.abs(x), math.abs(z)) > 165 then
+			local mat = Enum.Material.Grass
+			local roll = rng:NextNumber()
+			if roll > 0.62 then
+				mat = Enum.Material.LeafyGrass
+			elseif roll > 0.5 then
+				mat = Enum.Material.Ground
+			end
+			terrain:FillBlock(CFrame.new(x, -0.9, z) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
+				Vector3.new(rng:NextNumber(18, 46), 4, rng:NextNumber(18, 46)), mat)
+		end
 	end
 	for _ = 1, 50 do
 		local x = rng:NextNumber(-worldHalf, worldHalf)
 		local z = rng:NextNumber(-worldHalf, worldHalf)
-		if math.max(math.abs(x), math.abs(z)) > 150 then
+		if math.max(math.abs(x), math.abs(z)) > 165 then
 			terrain:FillBall(Vector3.new(x, rng:NextNumber(2, 12), z), rng:NextNumber(8, 18), Enum.Material.Rock)
 		end
 	end
 
-	-- Strict generator placement: flatten and clear every generator
-	-- site so no generator ends up on a slope or inside a hill.
+	-- Withered grass and dead turf inside the core trenches too.
+	for _ = 1, 60 do
+		local x = rng:NextNumber(-120, 120)
+		local z = rng:NextNumber(-120, 120)
+		if math.sqrt(x * x + z * z) > 62 then
+			terrain:FillBlock(CFrame.new(x, -0.9, z) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
+				Vector3.new(rng:NextNumber(8, 18), 3.5, rng:NextNumber(8, 18)),
+				rng:NextNumber() > 0.5 and Enum.Material.Grass or Enum.Material.LeafyGrass)
+		end
+	end
+
+	-- THE SUNKEN CRATER: the earth dips ~14 studs into a hollow basin at
+	-- dead center. Carved AFTER the ridges so any ridge crossing the
+	-- middle is sheared away; the road spokes (drawn later, ground-
+	-- sampling) become the descending ramps into the bowl.
+	terrain:FillCylinder(CFrame.new(0, -2.5, 0), 23, 58, Enum.Material.Air)
+	terrain:FillCylinder(CFrame.new(0, -14.2, 0), 3, 58, Enum.Material.Mud)
+
+	-- STRICT GENERATOR PLACEMENT + BLIND ALCOVES: every generator site is
+	-- flattened and cleared, then the earth is cupped around three sides
+	-- of it — a horseshoe bank with a single opening facing the crater.
 	for _, g in GEN_POSITIONS do
 		terrain:FillBlock(CFrame.new(g.X, -1.5, g.Z), Vector3.new(16, 5, 16), Enum.Material.Ground)
 		terrain:FillBlock(CFrame.new(g.X, 9, g.Z), Vector3.new(16, 16, 16), Enum.Material.Air)
+		local toHub = math.atan2(-g.X, -g.Z)
+		for i = 0, 11 do
+			local a = toHub + math.pi * (0.32 + (i / 11) * 1.36)
+			local bx, bz = g.X + math.sin(a) * 13, g.Z + math.cos(a) * 13
+			local r = rng:NextNumber(5.5, 7.5)
+			terrain:FillBall(Vector3.new(bx, 1 + rng:NextNumber(7, 10) - r, bz), r, Enum.Material.Mud)
+		end
 	end
-	-- Flatten the center too, for the future Discussion Hall / current
-	-- spawn area.
-	terrain:FillBlock(CFrame.new(0, -1.5, 0), Vector3.new(50, 5, 40), Enum.Material.Ground)
-	terrain:FillBlock(CFrame.new(0, 9, 0), Vector3.new(50, 16, 40), Enum.Material.Air)
+
+	-- THE PERIMETER BLUFF: two staggered rings of huge slate domes rim
+	-- the playable core — a continuous, unclimbable cage wall.
+	for i = 0, 47 do
+		local a = (i / 48) * math.pi * 2
+		terrain:FillBall(Vector3.new(math.cos(a) * 142, 1, math.sin(a) * 142), 26, Enum.Material.Slate)
+	end
+	for i = 0, 47 do
+		local a = ((i + 0.5) / 48) * math.pi * 2
+		terrain:FillBall(Vector3.new(math.cos(a) * 132, -4, math.sin(a) * 132), 17, Enum.Material.Slate)
+	end
 
 	-- Swamp in the SE: shallow water over mud.
 	terrain:FillBlock(CFrame.new(55, -0.4, -95), Vector3.new(34, 3, 26), Enum.Material.Mud)
 	terrain:FillBlock(CFrame.new(55, 0.7, -95), Vector3.new(26, 0.9, 18), Enum.Material.Water)
 
-	-- Dirt roads: a curved spoke from the center to every generator,
-	-- plus an outer loop trail connecting them, plus an exit road.
+	-- Gravel arteries: curved spokes from the crater to every generator
+	-- (their ends ramp down the crater wall), an outer loop trail, and a
+	-- dead-end exit road that dies at the bluff.
 	local HUB = Vector3.new(0, 0, 0)
 	for _, g in GEN_POSITIONS do
 		curvedRoad(HUB, g, rng:NextNumber(14, 30) * (rng:NextInteger(0, 1) == 0 and -1 or 1))
@@ -493,9 +556,20 @@ pcall(function()
 		curvedRoad(GEN_POSITIONS[ring[i]], GEN_POSITIONS[ring[i + 1]],
 			rng:NextNumber(10, 22) * (rng:NextInteger(0, 1) == 0 and -1 or 1))
 	end
-	curvedRoad(Vector3.new(0, 0, -17), Vector3.new(-14, 0, -122), 16) -- exit road
+	curvedRoad(Vector3.new(0, 0, -17), Vector3.new(-10, 0, -112), 16)
 
-	-- Creek bed: a shallow walkable ditch running from the swamp east.
+	-- Ancient oil stains and chemical spills along the gravel.
+	for _, seg in ROAD_SEGMENTS do
+		if rng:NextNumber() > 0.55 then
+			local t = rng:NextNumber(0.2, 0.8)
+			local p = seg[1]:Lerp(seg[2], t)
+			terrain:FillBlock(CFrame.new(p.X, groundY(p.X, p.Z) - 0.4, p.Z) * CFrame.Angles(0, rng:NextNumber(0, math.pi), 0),
+				Vector3.new(rng:NextNumber(3, 6), 1.6, rng:NextNumber(3, 6)), Enum.Material.Basalt)
+		end
+	end
+
+	-- Creek bed: a shallow walkable ditch running from the swamp east,
+	-- dying at the bluff.
 	for _, seg in {
 		{ Vector3.new(66, 0, -90), Vector3.new(95, 0, -70) },
 		{ Vector3.new(95, 0, -70), Vector3.new(114, 0, -58) },
@@ -744,13 +818,13 @@ local function setDay()
 	Lighting.ClockTime = 13
 	Lighting.Ambient = Color3.fromRGB(56, 56, 58)
 	Lighting.OutdoorAmbient = Color3.fromRGB(74, 74, 78)
-	-- Medium-heavy fog even by day: you should never see the far side
-	-- of the site, or more than one generator zone at a time.
-	atmosphere.Density = 0.38
-	atmosphere.Offset = 0.15
-	atmosphere.Color = Color3.fromRGB(180, 178, 170)
-	atmosphere.Decay = Color3.fromRGB(96, 98, 104)
-	atmosphere.Haze = 2
+	-- The atmospheric dissolve: heavy even by day — the mud lightens
+	-- into swirling grey-green haze well before the next ridge.
+	atmosphere.Density = 0.45
+	atmosphere.Offset = 0.12
+	atmosphere.Color = Color3.fromRGB(168, 172, 160)
+	atmosphere.Decay = Color3.fromRGB(88, 94, 92)
+	atmosphere.Haze = 2.4
 	atmosphere.Glare = 0.1
 	colorGrade.Saturation = -0.18
 	colorGrade.Contrast = 0.06
@@ -767,11 +841,13 @@ local function setNight()
 	Lighting.ClockTime = 0
 	Lighting.Ambient = Color3.fromRGB(0, 0, 0)
 	Lighting.OutdoorAmbient = Color3.fromRGB(10, 10, 14)
-	atmosphere.Density = 0.42
+	-- Night dissolve: the ground bleeds into the fog ~50 studs out;
+	-- earth and sky become one grey-green void.
+	atmosphere.Density = 0.5
 	atmosphere.Offset = 0
 	atmosphere.Color = Color3.fromRGB(26, 33, 31) -- cold green murk
 	atmosphere.Decay = Color3.fromRGB(10, 15, 13)
-	atmosphere.Haze = 2.6
+	atmosphere.Haze = 3
 	atmosphere.Glare = 0
 	colorGrade.Saturation = -0.42
 	colorGrade.Contrast = 0.16
