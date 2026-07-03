@@ -33,7 +33,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "1.0.0-phase1"
+local GAME_VERSION = "1.0.1-phase1"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -132,7 +132,8 @@ local MOLE_SABOTAGE_COOLDOWN = 20
 local MOLE_LURE_PER_NIGHT = 1
 local MOLE_LURE_DURATION = 8
 
-local ARENA_SIZE = 250 -- outdoor site footprint
+local ARENA_SIZE = 250 -- playable core: roads, generators, spawns
+local WORLD_SIZE = 2068 -- full terrain expanse (2068 x 2068 studs)
 local FLOOR_TOP = 1 -- terrain surface height
 
 -- ===================== REMOTES =====================
@@ -311,11 +312,17 @@ groundYForward = groundY
 -- once this phase reads right on its own.
 print("[NightShift] map: terrain…")
 
--- Safety net: invisible slab just under the ground, so a terrain
--- failure can never drop players into the void.
-local safetyFloor = part({ Name = "SafetyFloor", Size = Vector3.new(ARENA_SIZE + 20, 2, ARENA_SIZE + 20),
-	Position = Vector3.new(0, -0.2, 0), Transparency = 1 })
-addGroundInstance(safetyFloor)
+-- Safety net: invisible slabs just under the ground, so a terrain
+-- failure can never drop players into the void. Tiled 2x2 because a
+-- single Part cannot exceed 2048 studs on an axis.
+do
+	local tile = WORLD_SIZE / 2 + 12
+	for _, corner in { Vector3.new(-1, 0, -1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, 1), Vector3.new(1, 0, 1) } do
+		local slab = part({ Name = "SafetyFloor", Size = Vector3.new(tile, 2, tile),
+			Position = Vector3.new(corner.X * tile / 2, -0.2, corner.Z * tile / 2), Transparency = 1 })
+		addGroundInstance(slab)
+	end
+end
 
 -- Your imported "terrain" .glb can be large and slow to fetch — loading
 -- it must NEVER block the map from finishing or the game from being
@@ -387,27 +394,51 @@ end
 -- materials, roads, generator flattening, swamp, creek. This is the
 -- floor the game is instantly playable on.
 pcall(function()
-	-- Deep, wide base extending far past the fence line so the ground
-	-- reaches the horizon in every direction — never a floating island.
-	terrain:FillBlock(CFrame.new(0, -19, 0), Vector3.new(ARENA_SIZE + 200, 40, ARENA_SIZE + 200), Enum.Material.Ground)
+	-- The full 2068 x 2068 base slab. Voxel terrain handles this in one
+	-- bulk fill; the ground genuinely reaches the horizon.
+	terrain:FillBlock(CFrame.new(0, -19, 0), Vector3.new(WORLD_SIZE, 40, WORLD_SIZE), Enum.Material.Ground)
 
 	local rng = Random.new(7)
+	local worldHalf = WORLD_SIZE / 2 - 12
 
-	-- Continuous rolling hills across the WHOLE site, not just the
-	-- corners: many overlapping, shallow mounds so the ground undulates
-	-- everywhere you walk, the way real terrain does.
+	-- Continuous rolling hills inside the playable core: many
+	-- overlapping, shallow mounds so the ground undulates everywhere
+	-- you walk, the way real terrain does.
 	for _ = 1, 46 do
 		local x = rng:NextNumber(-125, 125)
 		local z = rng:NextNumber(-125, 125)
 		local r = rng:NextNumber(14, 30)
 		terrain:FillBall(Vector3.new(x, 1 - r * rng:NextNumber(0.45, 0.62), z), r, Enum.Material.Ground)
 	end
-	-- A few taller hills toward the edges, for a horizon silhouette.
-	for _, h in {
-		{ -100, -100, 24 }, { 105, -65, 20 }, { -105, 65, 20 }, { 100, 100, 24 },
-		{ -60, 105, 18 }, { 60, -110, 18 }, { -110, -40, 16 },
-	} do
-		terrain:FillBall(Vector3.new(h[1], 1 - h[3] * 0.58, h[2]), h[3], Enum.Material.Ground)
+	-- Wilderness beyond the core: hundreds of hills across the whole
+	-- 2068 expanse, growing larger and taller toward the far edges so
+	-- the horizon reads as ridgelines, not a flat plain.
+	for _ = 1, 380 do
+		local x = rng:NextNumber(-worldHalf, worldHalf)
+		local z = rng:NextNumber(-worldHalf, worldHalf)
+		local distFromCore = math.max(math.abs(x), math.abs(z))
+		if distFromCore &gt; 140 then
+			local r = rng:NextNumber(16, 34) + (distFromCore / worldHalf) * 26
+			terrain:FillBall(Vector3.new(x, 1 - r * rng:NextNumber(0.42, 0.6), z), r, Enum.Material.Ground)
+		end
+	end
+	-- Far ridgelines: big overlapping mounds rimming the outer third.
+	for _ = 1, 40 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local radius = rng:NextNumber(worldHalf * 0.62, worldHalf * 0.95)
+		local r = rng:NextNumber(40, 70)
+		terrain:FillBall(Vector3.new(math.cos(angle) * radius, 1 - r * rng:NextNumber(0.4, 0.55), math.sin(angle) * radius),
+			r, Enum.Material.Ground)
+	end
+	-- Wilderness ponds and marshes, scattered outside the playable core.
+	for _ = 1, 10 do
+		local x = rng:NextNumber(-worldHalf * 0.85, worldHalf * 0.85)
+		local z = rng:NextNumber(-worldHalf * 0.85, worldHalf * 0.85)
+		if math.max(math.abs(x), math.abs(z)) &gt; 180 then
+			local w = rng:NextNumber(30, 70)
+			terrain:FillBlock(CFrame.new(x, -0.4, z), Vector3.new(w * 1.3, 3, w), Enum.Material.Mud)
+			terrain:FillBlock(CFrame.new(x, 0.7, z), Vector3.new(w, 0.9, w * 0.72), Enum.Material.Water)
+		end
 	end
 	-- Dirt berms: subtle interior rises that break sightlines at
 	-- ground level even where nothing else is built yet.
@@ -420,8 +451,9 @@ pcall(function()
 
 	-- Ground cover variety: base Grass, overgrown LeafyGrass patches
 	-- (taller, decorated blades — the "tall grass" look), bare dirt
-	-- clearings, and mossy rock outcrops on a few hilltops.
-	for _ = 1, 90 do
+	-- clearings, and mossy rock outcrops. Dense detail in the playable
+	-- core, then the same treatment sweeping across all 2068 studs.
+	local function coverPatch(x: number, z: number, minSize: number, maxSize: number)
 		local mat = Enum.Material.Grass
 		local roll = rng:NextNumber()
 		if roll &gt; 0.62 then
@@ -429,13 +461,25 @@ pcall(function()
 		elseif roll &gt; 0.5 then
 			mat = Enum.Material.Ground
 		end
-		terrain:FillBlock(CFrame.new(rng:NextNumber(-118, 118), -0.9, rng:NextNumber(-118, 118))
-			* CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
-			Vector3.new(rng:NextNumber(10, 26), 4, rng:NextNumber(10, 26)), mat)
+		terrain:FillBlock(CFrame.new(x, -0.9, z) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
+			Vector3.new(rng:NextNumber(minSize, maxSize), 4, rng:NextNumber(minSize, maxSize)), mat)
+	end
+	for _ = 1, 90 do
+		coverPatch(rng:NextNumber(-118, 118), rng:NextNumber(-118, 118), 10, 26)
+	end
+	for _ = 1, 420 do
+		coverPatch(rng:NextNumber(-worldHalf, worldHalf), rng:NextNumber(-worldHalf, worldHalf), 18, 46)
 	end
 	for _ = 1, 10 do
 		terrain:FillBall(Vector3.new(rng:NextNumber(-110, 110), rng:NextNumber(2, 8), rng:NextNumber(-110, 110)),
 			rng:NextNumber(6, 11), Enum.Material.Rock)
+	end
+	for _ = 1, 50 do
+		local x = rng:NextNumber(-worldHalf, worldHalf)
+		local z = rng:NextNumber(-worldHalf, worldHalf)
+		if math.max(math.abs(x), math.abs(z)) &gt; 150 then
+			terrain:FillBall(Vector3.new(x, rng:NextNumber(2, 12), z), rng:NextNumber(8, 18), Enum.Material.Rock)
+		end
 	end
 
 	-- Strict generator placement: flatten and clear every generator
