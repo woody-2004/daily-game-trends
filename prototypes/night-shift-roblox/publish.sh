@@ -3,8 +3,8 @@
 # Usage: ROBLOX_API_KEY="<key>" ./publish.sh
 # Requires the environment's network policy to allow apis.roblox.com.
 set -e
-UNIVERSE_ID=10440164192
-PLACE_ID=129932135691270
+UNIVERSE_ID=10433913208
+PLACE_ID=136297985518549
 RBXLX="$(dirname "$0")/NightShift.rbxlx"
 
 if [ -z "$ROBLOX_API_KEY" ]; then
