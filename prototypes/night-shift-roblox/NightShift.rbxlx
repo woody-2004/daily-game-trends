@@ -33,7 +33,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "0.10.0"
+local GAME_VERSION = "0.11.0"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -75,15 +75,15 @@ end
 -- the game is allowed to load them. Any ID left as 0 keeps the built-in
 -- procedural version — nothing breaks while IDs are missing.
 local IMPORTED_ASSETS = {
-	villain = 0, -- VILAN.glb -&gt; becomes The Watcher
-	flashlight = 0, -- horror_game_flashlight_download_game-ready.glb
+	villain = 89840865172931, -- "mop" -&gt; becomes The Watcher
+	flashlight = 94078352716367, -- "flash light"
 	environments = {
 		-- Each replaces one procedural zone (footprint = width in studs).
-		{ id = 0, zone = "Hall", name = "AutumnForestHouse", pos = Vector3.new(0, 0, 0), footprint = 52, yaw = 180 }, -- autumn_forest_wooden_house.glb (Discussion Hall)
-		{ id = 0, zone = "Barn", name = "AbandonedFarm", pos = Vector3.new(66, 0, -64), footprint = 58, yaw = 0 }, -- abandoned_farm__psx_environment.glb
-		{ id = 0, zone = "Factory", name = "HallRanch", pos = Vector3.new(80, 0, 42), footprint = 58, yaw = 0 }, -- hall_ranch_-_upper_nelson_loop.glb
-		{ id = 0, zone = "Warehouse", name = "BlueJayMine", pos = Vector3.new(-78, 0, -68), footprint = 58, yaw = 0 }, -- the_blue_jay_mine.glb
-		{ id = 0, zone = "Junkyard", name = "ForestLoner", pos = Vector3.new(-82, 0, 30), footprint = 46, yaw = 0 }, -- dae_diorama_-_forest_loner.glb
+		{ id = 112181051620055, zone = "Hall", name = "CampHouse", pos = Vector3.new(0, 0, 0), footprint = 52, yaw = 180 }, -- "camp house" (Discussion Hall)
+		{ id = 101577288469591, zone = "Barn", name = "FarmHouseAndLake", pos = Vector3.new(66, 0, -64), footprint = 58, yaw = 0 }, -- "farm house and lake"
+		{ id = 89317303583763, zone = "Factory", name = "TerrainDiorama", pos = Vector3.new(80, 0, 42), footprint = 62, yaw = 0 }, -- "terrain"
+		{ id = 131157036777467, zone = "Warehouse", name = "OldCasaDeSin", pos = Vector3.new(-78, 0, -68), footprint = 58, yaw = 0 }, -- "old casa de sin"
+		{ id = 0, zone = "Junkyard", name = "ForestLoner", pos = Vector3.new(-82, 0, 30), footprint = 46, yaw = 0 }, -- (no import yet: keeps the wrecked trucks)
 	},
 }
 
