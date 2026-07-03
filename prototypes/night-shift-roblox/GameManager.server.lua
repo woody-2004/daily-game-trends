@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "1.4.0-quadrants"
+local GAME_VERSION = "1.5.0-storeassets"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -54,29 +54,30 @@ local function makeSound(props: { [string]: any }): Sound
 	return s
 end
 
--- ===================== IMPORTED ASSETS (your .glb uploads) =====================
--- Fill these with YOUR asset IDs (Studio: View -> Toolbox -> Inventory ->
--- My Models -> right-click a model -> Copy Asset ID). You own them, so
--- the game is allowed to load them. Any ID left as 0 keeps the built-in
--- procedural version — nothing breaks while IDs are missing.
+-- ===================== IMPORTED ASSETS (sourced from the Creator Store) =====================
+-- No longer your own uploaded .glb files — every ID below is a free
+-- Creator Store model, found via the toolbox search API and verified
+-- by name/creator before use. Any ID left as 0 keeps the built-in
+-- procedural version — nothing breaks while an asset is unavailable.
 local IMPORTED_ASSETS = {
-	-- Correction from the earlier guess: "mop" is a grimy wooden-handle
-	-- mop model, not a monster — it's the flashlight now. No uploaded
-	-- mesh is assigned to the Watcher, so it uses an improved
-	-- procedural silhouette (tall, gaunt, faceless) instead.
+	-- No monster asset is assigned: Creator Store horror "villain"
+	-- results were dominated by The Rake (a specific, recognizable fan
+	-- character) — reskinning that would make the Watcher feel like a
+	-- knockoff rather than its own thing, so it keeps the tall, gaunt,
+	-- faceless procedural silhouette instead.
 	villain = 0,
-	flashlight = 89840865172931, -- "mop" -> replaces the grey flashlight stick
-	terrainGround = 0, -- ground is the hand-built crater/ridge voxel design; "terrain" glb is used as a building below instead
+	flashlight = 110700594151156, -- "Flashlight Handheld Lamp Dark Tool Light"
+	terrainGround = 0, -- ground is the hand-built crater/ridge voxel design
 	-- Quadrant layout: one building per zone, matching the map brief.
-	--   Camp House    -> center (Discussion Hall / safe zone)
-	--   Farm House    -> SE, beside the swamp (Barn zone, generator at the doors)
-	--   Old Casa de Sin -> SW peninsula (Warehouse zone, tight interior)
-	--   Terrain diorama -> NE elevated clearing (Factory zone, 3 entry paths)
+	--   Camp House  -> center (Discussion Hall / safe zone)
+	--   Farm House  -> SE, beside the swamp (Barn zone, generator at the doors)
+	--   Casa de Sin -> SW peninsula (Warehouse zone, tight interior)
+	--   Factory     -> NE elevated clearing (3 entry paths)
 	environments = {
-		{ id = 112181051620055, zone = "Hall", name = "CampHouse", pos = Vector3.new(0, 0, 0), footprint = 52, yaw = 180 },
-		{ id = 101577288469591, zone = "Farm", name = "FarmHouseAndLake", pos = Vector3.new(60, 0, -58), footprint = 58, yaw = 20 },
-		{ id = 131157036777467, zone = "Casa", name = "OldCasaDeSin", pos = Vector3.new(-62, 0, -50), footprint = 54, yaw = 200 },
-		{ id = 89317303583763, zone = "Factory", name = "FactoryDiorama", pos = Vector3.new(95, 0, 55), footprint = 62, yaw = 300 },
+		{ id = 109175553546833, zone = "Hall", name = "CampHouse", pos = Vector3.new(0, 0, 0), footprint = 52, yaw = 180 }, -- "Big Log Cabin (UNFURNISHED)"
+		{ id = 12129034740, zone = "Farm", name = "FarmHouseAndLake", pos = Vector3.new(60, 0, -58), footprint = 58, yaw = 20 }, -- "abandoned barn"
+		{ id = 128655727108731, zone = "Casa", name = "OldCasaDeSin", pos = Vector3.new(-62, 0, -50), footprint = 54, yaw = 200 }, -- "Abandoned building Broken Dark Decay Empty"
+		{ id = 112448492652447, zone = "Factory", name = "FactoryDiorama", pos = Vector3.new(95, 0, 55), footprint = 62, yaw = 300 }, -- "Industrial Factory Building"
 	},
 }
 
