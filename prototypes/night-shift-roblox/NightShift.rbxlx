@@ -33,7 +33,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "1.1.0-phase1"
+local GAME_VERSION = "1.2.0-village"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -602,13 +602,13 @@ pcall(function()
 end)
 
 -- ===================== PHASE ROADMAP =====================
--- Phase 1 (terrain) is above. Everything else was deleted for this
--- restart and comes back deliberately, one phase at a time:
+-- Phase 1 (terrain) is above. Phase 3 (village structures, below) is
+-- done too -- built ahead of Phase 2 since it's what you asked for
+-- next. Still to come:
 --   Phase 2: forest (trees, bushes, threaded through the map)
---   Phase 3: buildings (Discussion Hall + your imported structures)
---   Phase 4: props (fences, wrecks, cover, lighting fixtures)
--- Generators (Stage 5, below) and a minimal spawn area already work
--- so the game is fully playable while later phases are rebuilt.
+--   Phase 4: fences, wrecks, and other perimeter/generator cover
+-- Generators (Stage 5, below) and the village are both fully built so
+-- the game is playable while Phase 2 is filled in.
 
 -- A basic lamp + spawn cluster at the center, standing in for the
 -- Discussion Hall until Phase 3 rebuilds it properly.
@@ -655,6 +655,313 @@ for _, sp in {
 end
 
 print("[NightShift] map: phase 1 (terrain) complete")
+
+-- ===================== PHASE 3: VILLAGE STRUCTURES =====================
+-- Styled after the classic Roblox village template: small human-scale
+-- buildings organized into named zones (Structures, Garden, Orchard,
+-- MarshPlants, Props), warm hanging lanterns throughout. Aged and
+-- abandoned for Night Shift -- rotted wood, dead plants, cold forges.
+print("[NightShift] map: village…")
+
+local structuresFolder = mapFolder("Structures")
+local gardenFolder = mapFolder("Garden")
+local orchardFolder = mapFolder("Orchard")
+local marshFolder = mapFolder("MarshPlants")
+local villagePropsFolder = mapFolder("Props")
+local lanternsFolder = mapFolder("Lanterns")
+
+local function flattenSite(x: number, z: number, r: number)
+	pcall(function()
+		terrain:FillBlock(CFrame.new(x, FLOOR_TOP - 3, z), Vector3.new(r * 2, 8, r * 2), Enum.Material.Ground)
+		terrain:FillBlock(CFrame.new(x, FLOOR_TOP + 8, z), Vector3.new(r * 2, 16, r * 2), Enum.Material.Air)
+	end)
+end
+
+-- A hanging lantern: post + warm point light, lit steadily (unlike the
+-- flickering safe-zone lamp) -- marks a "was once lived-in" pocket.
+local function hangLantern(pos: Vector3, folder: Folder)
+	local y = groundY(pos.X, pos.Z)
+	part({ Parent = folder, Name = "LanternPost", Size = Vector3.new(0.5, 7, 0.5),
+		Position = pos + Vector3.new(0, y + 3.5, 0), Color = Color3.fromRGB(40, 36, 30), Material = Enum.Material.Wood })
+	part({ Parent = folder, Name = "LanternArm", Size = Vector3.new(2.4, 0.3, 0.3),
+		Position = pos + Vector3.new(1, y + 6.8, 0), Color = Color3.fromRGB(40, 36, 30), Material = Enum.Material.Wood })
+	local glass = part({ Parent = folder, Name = "LanternGlass", Size = Vector3.new(0.9, 1.2, 0.9),
+		Position = pos + Vector3.new(2.1, y + 6.3, 0), Color = Color3.fromRGB(255, 200, 120),
+		Material = Enum.Material.Neon, CanCollide = false, Transparency = 0.15 })
+	local light = Instance.new("PointLight")
+	light.Range = 22
+	light.Brightness = 1.8
+	light.Color = Color3.fromRGB(255, 190, 110)
+	light.Shadows = true
+	light.Parent = glass
+end
+
+-- One wall run with a pitched-roof-height top; matches the tilt math
+-- already proven correct on the earlier hall build (positive rotation
+-- on the +Z slab, negative on -Z, so the pair peaks at the centerline).
+local function cottageWallSeg(folder: Folder, a: Vector3, b: Vector3, yBottom: number, yTop: number,
+	mat: Enum.Material, color: Color3)
+	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	local len = delta.Magnitude
+	if len &lt; 0.4 or yTop - yBottom &lt; 0.4 then
+		return
+	end
+	local mid = (a + b) / 2
+	local yaw = math.atan2(delta.X, delta.Z)
+	part({ Parent = folder, Name = "Wall", Size = Vector3.new(0.9, yTop - yBottom, len),
+		CFrame = CFrame.new(mid.X, (yBottom + yTop) / 2, mid.Z) * CFrame.Angles(0, yaw, 0),
+		Material = mat, Color = color })
+end
+
+-- An abandoned cottage: rectangular shell, one doorway, a pitched roof,
+-- a leaning chimney, a lantern by the door. Palette is uniformly grey-
+-- rotted -- the decayed version of the template's cottages.
+local function buildCottage(name: string, center: Vector3, w: number, d: number, h: number, doorSide: string, folder: Folder)
+	flattenSite(center.X, center.Z, math.max(w, d) * 0.75 + 4)
+	local base = groundY(center.X, center.Z)
+	local f = Instance.new("Folder")
+	f.Name = name
+	f.Parent = folder
+	part({ Parent = f, Name = "Pad", Size = Vector3.new(w + 1.5, 0.4, d + 1.5),
+		Position = Vector3.new(center.X, base + 0.2, center.Z),
+		Color = Color3.fromRGB(70, 66, 60), Material = Enum.Material.WoodPlanks })
+	local mat, color = Enum.Material.WoodPlanks, Color3.fromRGB(58, 50, 42)
+	local x0, x1, z0, z1 = center.X - w / 2, center.X + w / 2, center.Z - d / 2, center.Z + d / 2
+	local bottom, top = base, base + h
+	local sides = {
+		N = { Vector3.new(x0, 0, z1), Vector3.new(x1, 0, z1) },
+		S = { Vector3.new(x0, 0, z0), Vector3.new(x1, 0, z0) },
+		E = { Vector3.new(x1, 0, z0), Vector3.new(x1, 0, z1) },
+		W = { Vector3.new(x0, 0, z0), Vector3.new(x0, 0, z1) },
+	}
+	for side, ab in sides do
+		local a, b = ab[1], ab[2]
+		if side == doorSide then
+			local mid = (a + b) / 2
+			local dir = (b - a).Unit
+			cottageWallSeg(f, a, mid - dir * 3.5, bottom, top, mat, color)
+			cottageWallSeg(f, mid + dir * 3.5, b, bottom, top, mat, color)
+			cottageWallSeg(f, mid - dir * 3.5, mid + dir * 3.5, bottom + 7, top, mat, color)
+		else
+			cottageWallSeg(f, a, b, bottom, top, mat, color)
+		end
+	end
+	part({ Parent = f, Name = "RoofN", Size = Vector3.new(w + 2, 0.6, d / 2 + 2),
+		CFrame = CFrame.new(center.X, top + 1.6, center.Z + d / 4) * CFrame.Angles(math.rad(20), 0, 0),
+		Color = Color3.fromRGB(40, 36, 32), Material = Enum.Material.Slate })
+	part({ Parent = f, Name = "RoofS", Size = Vector3.new(w + 2, 0.6, d / 2 + 2),
+		CFrame = CFrame.new(center.X, top + 1.6, center.Z - d / 4) * CFrame.Angles(math.rad(-20), 0, 0),
+		Color = Color3.fromRGB(40, 36, 32), Material = Enum.Material.Slate })
+	part({ Parent = f, Name = "Chimney", Size = Vector3.new(1.6, h * 0.9, 1.6),
+		CFrame = CFrame.new(x0 + 1.2, base + h * 0.45, z0 + 1.2) * CFrame.Angles(math.rad(4), 0, math.rad(3)),
+		Color = Color3.fromRGB(60, 56, 52), Material = Enum.Material.Brick })
+	hangLantern(Vector3.new(center.X, 0, z1 + 1.5), lanternsFolder)
+	return f
+end
+
+-- ---- The Discussion Hall: a real building around the crater lamp ----
+do
+	local w, d, h = 46, 40, 13
+	flattenSite(0, 0, 30)
+	local base = groundY(0, 0)
+	local f = Instance.new("Folder")
+	f.Name = "DiscussionHall"
+	f.Parent = structuresFolder
+	part({ Parent = f, Name = "Pad", Size = Vector3.new(w + 2, 0.4, d + 2), Position = Vector3.new(0, base + 0.2, 0),
+		Color = Color3.fromRGB(78, 72, 64), Material = Enum.Material.Concrete })
+	local mat, color = Enum.Material.Concrete, Color3.fromRGB(66, 62, 58)
+	local x0, x1, z0, z1 = -w / 2, w / 2, -d / 2, d / 2
+	local bottom, top = base, base + h
+	-- South wall: main doorway out toward the exit road.
+	do
+		local a, b = Vector3.new(x0, 0, z0), Vector3.new(x1, 0, z0)
+		local mid, dir = (a + b) / 2, (b - a).Unit
+		cottageWallSeg(f, a, mid - dir * 6, bottom, top, mat, color)
+		cottageWallSeg(f, mid + dir * 6, b, bottom, top, mat, color)
+		cottageWallSeg(f, mid - dir * 6, mid + dir * 6, bottom + 9, top, mat, color)
+	end
+	for _, side in { { Vector3.new(x0, 0, z1), Vector3.new(x1, 0, z1) },
+		{ Vector3.new(x1, 0, z0), Vector3.new(x1, 0, z1) },
+		{ Vector3.new(x0, 0, z0), Vector3.new(x0, 0, z1) } } do
+		cottageWallSeg(f, side[1], side[2], bottom, top, mat, color)
+	end
+	part({ Parent = f, Name = "RoofN", Size = Vector3.new(w + 3, 0.7, d / 2 + 3),
+		CFrame = CFrame.new(0, top + 1.8, d / 4) * CFrame.Angles(math.rad(16), 0, 0),
+		Color = Color3.fromRGB(42, 40, 38), Material = Enum.Material.Slate })
+	part({ Parent = f, Name = "RoofS", Size = Vector3.new(w + 3, 0.7, d / 2 + 3),
+		CFrame = CFrame.new(0, top + 1.8, -d / 4) * CFrame.Angles(math.rad(-16), 0, 0),
+		Color = Color3.fromRGB(42, 40, 38), Material = Enum.Material.Slate })
+	hangLantern(Vector3.new(-6, 0, z0 - 1.5), lanternsFolder)
+	hangLantern(Vector3.new(6, 0, z0 - 1.5), lanternsFolder)
+end
+
+-- ---- Outlying cottages, scattered on the ridges/ring ----
+for _, spec in {
+	{ "Cottage1", Vector3.new(112, 0, 42), "S" },
+	{ "Cottage2", Vector3.new(-108, 0, -18), "E" },
+	{ "Cottage3", Vector3.new(22, 0, 112), "S" },
+	{ "Cottage4", Vector3.new(-44, 0, -102), "N" },
+} do
+	buildCottage(spec[1], spec[2], 18, 15, 9, spec[3], structuresFolder)
+end
+
+-- ---- The Smithy: a cold forge, one dying ember of light ----
+do
+	local center = Vector3.new(28, 0, 34)
+	local f = buildCottage("Smithy", center, 16, 13, 8, "W", structuresFolder)
+	local hearth = part({ Parent = f, Name = "Forge", Size = Vector3.new(3, 2, 3),
+		Position = center + Vector3.new(4, groundY(center.X, center.Z) + 1, 0),
+		Color = Color3.fromRGB(24, 20, 18), Material = Enum.Material.Slate })
+	local emberLight = Instance.new("PointLight")
+	emberLight.Range = 12
+	emberLight.Brightness = 0.6
+	emberLight.Color = Color3.fromRGB(255, 90, 40)
+	emberLight.Parent = hearth
+	task.spawn(function()
+		local rng = Random.new()
+		while true do
+			task.wait(rng:NextNumber(0.3, 0.9))
+			emberLight.Brightness = rng:NextNumber(0.15, 0.7)
+		end
+	end)
+end
+
+-- ---- The Mill: a broken wheel, seized up beside the creek ----
+do
+	local center = Vector3.new(100, 0, -66)
+	flattenSite(center.X, center.Z, 14)
+	local base = groundY(center.X, center.Z)
+	local tower = part({ Parent = structuresFolder, Name = "MillTower", Size = Vector3.new(9, 16, 9),
+		Position = center + Vector3.new(0, base + 8, 0), Color = Color3.fromRGB(64, 60, 56), Material = Enum.Material.Concrete })
+	part({ Parent = structuresFolder, Name = "MillWheel", Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(1.4, 13, 13), CFrame = CFrame.new(center + Vector3.new(6, base + 7, 0))
+			* CFrame.Angles(0, 0, math.rad(90) + math.rad(14)),
+		Color = Color3.fromRGB(52, 42, 34), Material = Enum.Material.Wood, CanCollide = false })
+	local _ = tower
+	hangLantern(center + Vector3.new(-5, 0, -5), lanternsFolder)
+end
+
+-- ---- The Dock: rotted planks jutting into the swamp pond ----
+do
+	local base = groundY(70, -95)
+	for i = 0, 5 do
+		part({ Parent = structuresFolder, Name = "DockPlank", Size = Vector3.new(3.6, 0.4, 5),
+			Position = Vector3.new(60 + i * 3.7, base + 0.6, -95), Color = Color3.fromRGB(52, 46, 38), Material = Enum.Material.WoodPlanks })
+	end
+	for _, px in { 60, 78 } do
+		part({ Parent = structuresFolder, Name = "DockPost", Size = Vector3.new(0.8, 3, 0.8),
+			Position = Vector3.new(px, base - 0.5, -92.5), Color = Color3.fromRGB(40, 36, 30), Material = Enum.Material.Wood })
+	end
+end
+
+-- ---- The Bridge: a plank crossing over the creek ditch ----
+do
+	local a, b = Vector3.new(78, 0, -78), Vector3.new(90, 0, -66)
+	local mid = (a + b) / 2
+	local yaw = math.atan2(b.X - a.X, b.Z - a.Z)
+	local deckY = math.min(groundY(a.X, a.Z), groundY(b.X, b.Z)) + 1.5
+	part({ Parent = structuresFolder, Name = "BridgeDeck", Size = Vector3.new(6, 0.6, 18),
+		CFrame = CFrame.new(mid.X, deckY, mid.Z) * CFrame.Angles(0, yaw, 0),
+		Color = Color3.fromRGB(54, 48, 40), Material = Enum.Material.WoodPlanks })
+	for _, side in { -2.6, 2.6 } do
+		part({ Parent = structuresFolder, Name = "BridgeRail", Size = Vector3.new(0.4, 2, 18),
+			CFrame = CFrame.new(mid.X, deckY + 1.2, mid.Z) * CFrame.Angles(0, yaw, 0) * CFrame.new(side, 0, 0),
+			Color = Color3.fromRGB(46, 40, 34), Material = Enum.Material.Wood, CanCollide = false })
+	end
+end
+
+-- ---- Garden: a small fenced plot of dead plants by the hall ----
+do
+	local cx, cz = -30, -22
+	for i = -2, 2 do
+		for j = -1, 1 do
+			local x, z = cx + i * 4, cz + j * 4
+			local y = groundY(x, z)
+			part({ Parent = gardenFolder, Name = "DeadStalk", Size = Vector3.new(0.5, 2.4, 0.5),
+				Position = Vector3.new(x, y + 1.2, z), Color = Color3.fromRGB(74, 66, 46), Material = Enum.Material.Wood, CanCollide = false })
+		end
+	end
+	for _, corner in { Vector3.new(cx - 11, 0, cz - 7), Vector3.new(cx + 11, 0, cz - 7),
+		Vector3.new(cx - 11, 0, cz + 7), Vector3.new(cx + 11, 0, cz + 7) } do
+		local y = groundY(corner.X, corner.Z)
+		part({ Parent = gardenFolder, Name = "FencePost", Size = Vector3.new(0.6, 3, 0.6),
+			Position = corner + Vector3.new(0, y + 1.5, 0), Color = Color3.fromRGB(50, 44, 36), Material = Enum.Material.Wood })
+	end
+end
+
+-- ---- Orchard: bare, dead trees in neat rows ----
+do
+	local rng = Random.new(41)
+	for row = 0, 3 do
+		for col = 0, 2 do
+			local x = 108 + row * 7
+			local z = 60 + col * 7
+			local y = groundY(x, z)
+			local h = rng:NextNumber(8, 12)
+			part({ Parent = orchardFolder, Name = "DeadOrchardTree", Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(h, 1.1, 1.1),
+				CFrame = CFrame.new(x, y + h / 2, z) * CFrame.Angles(0, 0, math.rad(90) + math.rad(rng:NextNumber(-4, 4))),
+				Color = Color3.fromRGB(46, 38, 32), Material = Enum.Material.Wood })
+			for _ = 1, 2 do
+				part({ Parent = orchardFolder, Name = "DeadBranch", Shape = Enum.PartType.Cylinder,
+					Size = Vector3.new(rng:NextNumber(3, 5), 0.5, 0.5),
+					CFrame = CFrame.new(x, y + h * rng:NextNumber(0.6, 0.9), z)
+						* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(20, 50))),
+					Color = Color3.fromRGB(42, 34, 28), Material = Enum.Material.Wood, CanCollide = false })
+			end
+		end
+	end
+end
+
+-- ---- Marsh plants: reeds and cattails around the swamp pond ----
+do
+	local rng = Random.new(53)
+	for _ = 1, 26 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local dist = rng:NextNumber(14, 24)
+		local x, z = 55 + math.cos(angle) * dist, -95 + math.sin(angle) * dist
+		local y = groundY(x, z)
+		local h = rng:NextNumber(3, 5.5)
+		part({ Parent = marshFolder, Name = "Reed", Size = Vector3.new(0.25, h, 0.25),
+			Position = Vector3.new(x, y + h / 2, z), Color = Color3.fromRGB(58, 66, 44),
+			Material = Enum.Material.Grass, CanCollide = false })
+		if rng:NextNumber() &gt; 0.5 then
+			part({ Parent = marshFolder, Name = "Cattail", Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(0.9, 0.35, 0.35), CFrame = CFrame.new(x, y + h + 0.3, z) * CFrame.Angles(0, 0, math.rad(90)),
+				Color = Color3.fromRGB(70, 50, 30), Material = Enum.Material.CorrodedMetal, CanCollide = false })
+		end
+	end
+end
+
+-- ---- Props: hay bales, a cart, barrels near the village ----
+do
+	local rng = Random.new(59)
+	for _, pos in { Vector3.new(120, 0, 50), Vector3.new(-100, 0, -10), Vector3.new(30, 0, 26) } do
+		local y = groundY(pos.X, pos.Z)
+		part({ Parent = villagePropsFolder, Name = "HayBale", Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(3, 3.2, 3.2), CFrame = CFrame.new(pos.X, y + 1.6, pos.Z) * CFrame.Angles(0, 0, math.rad(90)),
+			Color = Color3.fromRGB(120, 100, 58), Material = Enum.Material.Fabric })
+	end
+	for _, pos in { Vector3.new(24, 0, 40), Vector3.new(-102, 0, -24) } do
+		local y = groundY(pos.X, pos.Z)
+		part({ Parent = villagePropsFolder, Name = "Barrel", Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(2.6, 2, 2), CFrame = CFrame.new(pos.X, y + 1, pos.Z) * CFrame.Angles(0, 0, math.rad(90)),
+			Color = Color3.fromRGB(72, 50, 34), Material = Enum.Material.WoodPlanks })
+	end
+	do
+		local pos = Vector3.new(20, 0, 44)
+		local y = groundY(pos.X, pos.Z)
+		part({ Parent = villagePropsFolder, Name = "CartBed", Size = Vector3.new(5, 0.6, 3),
+			Position = Vector3.new(pos.X, y + 1.6, pos.Z), Color = Color3.fromRGB(60, 48, 36), Material = Enum.Material.WoodPlanks })
+		for _, wz in { 1.6, -1.6 } do
+			part({ Parent = villagePropsFolder, Name = "CartWheel", Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(0.6, 2.4, 2.4), CFrame = CFrame.new(pos.X - 1.5, y + 1.2, pos.Z + wz) * CFrame.Angles(0, 0, math.rad(90)),
+				Color = Color3.fromRGB(36, 32, 28), Material = Enum.Material.Wood })
+		end
+	end
+end
+
+print("[NightShift] map: village complete")
 
 -- ---- Stage 5: generators (one per named zone) ----
 local function buildGenerators()
