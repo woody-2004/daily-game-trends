@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "0.12.0"
+local GAME_VERSION = "0.12.1"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -244,100 +244,6 @@ local function nearGenerator(pos: Vector3, dist: number): boolean
 	return false
 end
 
--- ---- Stage 1: terrain (your imported mesh is the actual floor) ----
-print("[NightShift] map: terrain…")
--- Safety net: invisible slab just under the ground, so a terrain
--- failure can never drop players into the void.
-local safetyFloor = part({ Name = "SafetyFloor", Size = Vector3.new(ARENA_SIZE + 20, 2, ARENA_SIZE + 20),
-	Position = Vector3.new(0, -0.2, 0), Transparency = 1 })
-addGroundInstance(safetyFloor)
-
-local groundMesh = loadImportedModel(IMPORTED_ASSETS.terrainGround)
-if groundMesh then
-	groundMesh.Name = "TerrainGround"
-	local ext = groundMesh:GetExtentsSize()
-	pcall(function()
-		groundMesh:ScaleTo((ARENA_SIZE + 30) / math.max(ext.X, ext.Z, 0.1))
-	end)
-	groundMesh:PivotTo(CFrame.new(0, 0, 0))
-	local bbCF, bbSize = groundMesh:GetBoundingBox()
-	groundMesh:PivotTo(groundMesh:GetPivot() + Vector3.new(0, -0.5 - (bbCF.Position.Y - bbSize.Y / 2), 0))
-	groundMesh.Parent = arena
-	addGroundInstance(groundMesh)
-	print("[NightShift] map: imported terrain mesh is the ground")
-end
-
-local terrain = Workspace.Terrain
--- Animated grass blades on every Grass/LeafyGrass patch (tall, waving).
-pcall(function()
-	terrain.Decoration = true
-end)
-pcall(function()
-	(terrain :: any).GrassLength = 1
-end)
-
--- Every road segment is recorded so trees and clutter never sit on a road.
-local ROAD_SEGMENTS: { { Vector3 } } = {}
-
-local function roadStrip(a: Vector3, b: Vector3)
-	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
-	if delta.Magnitude < 1 then
-		return
-	end
-	local mid = (a + b) / 2
-	local yaw = math.atan2(delta.X, delta.Z)
-	terrain:FillBlock(CFrame.new(mid.X, 0.7, mid.Z) * CFrame.Angles(0, yaw, 0),
-		Vector3.new(7, 2.2, delta.Magnitude + 6), Enum.Material.Mud)
-	table.insert(ROAD_SEGMENTS, { a, b })
-end
-
--- Roads bend: a quadratic curve sampled as short strips, so you can
--- never see far down a road, and the map feels bigger than it is.
-local function curvedRoad(a: Vector3, b: Vector3, bend: number)
-	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
-	if delta.Magnitude < 8 then
-		roadStrip(a, b)
-		return
-	end
-	local ctrl = (a + b) / 2 + Vector3.new(-delta.Z, 0, delta.X).Unit * bend
-	local prev = a
-	for i = 1, 4 do
-		local t = i / 4
-		local p = a * ((1 - t) * (1 - t)) + ctrl * (2 * (1 - t) * t) + b * (t * t)
-		roadStrip(prev, p)
-		prev = p
-	end
-end
-
-local function nearRoad(pos: Vector3, dist: number): boolean
-	for _, seg in ROAD_SEGMENTS do
-		local a, b = seg[1], seg[2]
-		local ab = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
-		local t = math.clamp(Vector3.new(pos.X - a.X, 0, pos.Z - a.Z):Dot(ab) / math.max(ab:Dot(ab), 0.001), 0, 1)
-		local closest = a + ab * t
-		if (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(closest.X, 0, closest.Z)).Magnitude < dist then
-			return true
-		end
-	end
-	return false
-end
-
-local function scenerySpotFree(pos: Vector3): boolean
-	if pos.Magnitude < SAFE_ZONE_RADIUS + 6 then
-		return false
-	end
-	if insideKeepClear(pos) then
-		return false
-	end
-	if nearGenerator(pos, 9) then
-		return false
-	end
-	if nearRoad(pos, 6) then
-		return false
-	end
-	return true
-end
-
 -- ---- Imported-asset loader (used by environments, villain, flashlight) ----
 local InsertService = game:GetService("InsertService")
 
@@ -418,13 +324,114 @@ local function groundY(x: number, z: number): number
 end
 groundYForward = groundY
 
-pcall(function()
+-- ---- Stage 1: terrain (your imported mesh is the actual floor) ----
+print("[NightShift] map: terrain…")
+-- Safety net: invisible slab just under the ground, so a terrain
+-- failure can never drop players into the void.
+local safetyFloor = part({ Name = "SafetyFloor", Size = Vector3.new(ARENA_SIZE + 20, 2, ARENA_SIZE + 20),
+	Position = Vector3.new(0, -0.2, 0), Transparency = 1 })
+addGroundInstance(safetyFloor)
+
+-- Imports (your .glb assets) can be large and slow to fetch — loading
+-- them must NEVER block the map from finishing or the game from being
+-- playable. The voxel ground below always builds immediately; this
+-- import loads in the background and, if it arrives, is layered in as
+-- the visible top surface once it's ready (no waiting on it here).
+task.spawn(function()
+	local groundMesh = loadImportedModel(IMPORTED_ASSETS.terrainGround)
 	if groundMesh then
-		-- Horizon apron under/around the mesh so the world never ends.
-		terrain:FillBlock(CFrame.new(0, -20.5, 0), Vector3.new(ARENA_SIZE + 200, 40, ARENA_SIZE + 200), Enum.Material.Ground)
+		groundMesh.Name = "TerrainGround"
+		local ext = groundMesh:GetExtentsSize()
+		pcall(function()
+			groundMesh:ScaleTo((ARENA_SIZE + 30) / math.max(ext.X, ext.Z, 0.1))
+		end)
+		groundMesh:PivotTo(CFrame.new(0, 0, 0))
+		local bbCF, bbSize = groundMesh:GetBoundingBox()
+		groundMesh:PivotTo(groundMesh:GetPivot() + Vector3.new(0, -0.5 - (bbCF.Position.Y - bbSize.Y / 2), 0))
+		groundMesh.Parent = arena
+		addGroundInstance(groundMesh)
+		print("[NightShift] map: imported terrain mesh layered in as the ground")
+	end
+end)
+
+local terrain = Workspace.Terrain
+-- Animated grass blades on every Grass/LeafyGrass patch (tall, waving).
+pcall(function()
+	terrain.Decoration = true
+end)
+pcall(function()
+	(terrain :: any).GrassLength = 1
+end)
+
+-- Every road segment is recorded so trees and clutter never sit on a road.
+local ROAD_SEGMENTS: { { Vector3 } } = {}
+
+local function roadStrip(a: Vector3, b: Vector3)
+	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	if delta.Magnitude < 1 then
 		return
 	end
-	-- FALLBACK (mesh failed to load): voxel ground with full detail.
+	local mid = (a + b) / 2
+	local yaw = math.atan2(delta.X, delta.Z)
+	terrain:FillBlock(CFrame.new(mid.X, 0.7, mid.Z) * CFrame.Angles(0, yaw, 0),
+		Vector3.new(7, 2.2, delta.Magnitude + 6), Enum.Material.Mud)
+	table.insert(ROAD_SEGMENTS, { a, b })
+end
+
+-- Roads bend: a quadratic curve sampled as short strips, so you can
+-- never see far down a road, and the map feels bigger than it is.
+local function curvedRoad(a: Vector3, b: Vector3, bend: number)
+	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+	if delta.Magnitude < 8 then
+		roadStrip(a, b)
+		return
+	end
+	local ctrl = (a + b) / 2 + Vector3.new(-delta.Z, 0, delta.X).Unit * bend
+	local prev = a
+	for i = 1, 4 do
+		local t = i / 4
+		local p = a * ((1 - t) * (1 - t)) + ctrl * (2 * (1 - t) * t) + b * (t * t)
+		roadStrip(prev, p)
+		prev = p
+	end
+end
+
+local function nearRoad(pos: Vector3, dist: number): boolean
+	for _, seg in ROAD_SEGMENTS do
+		local a, b = seg[1], seg[2]
+		local ab = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+		local t = math.clamp(Vector3.new(pos.X - a.X, 0, pos.Z - a.Z):Dot(ab) / math.max(ab:Dot(ab), 0.001), 0, 1)
+		local closest = a + ab * t
+		if (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(closest.X, 0, closest.Z)).Magnitude < dist then
+			return true
+		end
+	end
+	return false
+end
+
+local function scenerySpotFree(pos: Vector3): boolean
+	if pos.Magnitude < SAFE_ZONE_RADIUS + 6 then
+		return false
+	end
+	if insideKeepClear(pos) then
+		return false
+	end
+	if nearGenerator(pos, 9) then
+		return false
+	end
+	if nearRoad(pos, 6) then
+		return false
+	end
+	return true
+end
+
+
+-- Always runs immediately (fast native terrain ops, no asset loads):
+-- base ground, roads, hills, generator flattening, swamp, creek. This
+-- is the floor the game is instantly playable on; the imported terrain
+-- mesh above layers in as decoration on top whenever it finishes
+-- loading, but gameplay never waits on it.
+pcall(function()
 	terrain:FillBlock(CFrame.new(0, -19, 0), Vector3.new(ARENA_SIZE + 200, 40, ARENA_SIZE + 200), Enum.Material.Ground)
 	local rng = Random.new(7)
 	-- Overgrown grass patches.
@@ -491,47 +498,63 @@ end)
 print("[NightShift] map: forest…")
 
 -- Real pine tree meshes from the Creator Store (first ID is Roblox's
--- own endorsed pine). Loaded synchronously before planting; if none
--- load, the part-built pine below takes over — the forest always grows.
+-- own endorsed pine). Loaded in the background with a short time
+-- budget — planting NEVER waits indefinitely on a slow/stuck asset
+-- fetch; if nothing has arrived in time, the part-built pine fallback
+-- takes over and the forest still grows on schedule.
 local PINE_ASSET_IDS = { 365275430, 5392132809, 73454171742334, 114819172494817, 91802183850152 }
 local pineTemplates: { Model } = {}
+local pineLoadsPending = #PINE_ASSET_IDS
 
 for _, assetId in PINE_ASSET_IDS do
-	pcall(function()
-		local asset = InsertService:LoadAsset(assetId)
-		for _, d in asset:GetDescendants() do
-			if d:IsA("LuaSourceContainer") then
-				d:Destroy() -- free models never get to run code here
-			elseif d:IsA("BasePart") then
-				d.Anchored = true
-			end
-		end
-		local models: { Model } = {}
-		for _, child in asset:GetChildren() do
-			if child:IsA("Model") then
-				table.insert(models, child)
-			end
-		end
-		if #models == 0 then
-			local wrap = Instance.new("Model")
-			for _, child in asset:GetChildren() do
-				if child:IsA("BasePart") then
-					child.Parent = wrap
+	task.spawn(function()
+		pcall(function()
+			local asset = InsertService:LoadAsset(assetId)
+			for _, d in asset:GetDescendants() do
+				if d:IsA("LuaSourceContainer") then
+					d:Destroy() -- free models never get to run code here
+				elseif d:IsA("BasePart") then
+					d.Anchored = true
 				end
 			end
-			if #wrap:GetChildren() > 0 then
-				table.insert(models, wrap)
+			local models: { Model } = {}
+			for _, child in asset:GetChildren() do
+				if child:IsA("Model") then
+					table.insert(models, child)
+				end
 			end
-		end
-		for _, model in models do
-			local h = model:GetExtentsSize().Y
-			if h >= 8 and h <= 200 then
-				table.insert(pineTemplates, model)
+			if #models == 0 then
+				local wrap = Instance.new("Model")
+				for _, child in asset:GetChildren() do
+					if child:IsA("BasePart") then
+						child.Parent = wrap
+					end
+				end
+				if #wrap:GetChildren() > 0 then
+					table.insert(models, wrap)
+				end
 			end
-		end
+			for _, model in models do
+				local h = model:GetExtentsSize().Y
+				if h >= 8 and h <= 200 then
+					table.insert(pineTemplates, model)
+				end
+			end
+		end)
+		pineLoadsPending -= 1
 	end)
 end
-print("[NightShift] map: loaded " .. #pineTemplates .. " pine mesh templates")
+
+-- Give the pine fetches up to 3 seconds total; planting proceeds the
+-- moment they're all done, or when the budget runs out either way.
+do
+	local waited = 0
+	while pineLoadsPending > 0 and waited < 3 do
+		task.wait(0.1)
+		waited += 0.1
+	end
+end
+print("[NightShift] map: loaded " .. #pineTemplates .. " pine mesh templates (" .. pineLoadsPending .. " still pending, using fallback for those)")
 
 local function makePartPine(rng: Random, pos: Vector3)
 	-- Fallback tiered pine, used only if no mesh templates loaded.
@@ -1498,7 +1521,9 @@ monster.Parent = Workspace
 
 -- Your imported VILAN.glb replaces the placeholder box-and-eyes Watcher.
 -- The invisible Core part stays: it drives movement and the kill radius.
-pcall(function()
+-- Loaded in the background — the Watcher hunts with its placeholder
+-- look immediately and gets its new face whenever the mesh arrives.
+task.spawn(function() pcall(function()
 	local villain = loadImportedModel(IMPORTED_ASSETS.villain)
 	if villain then
 		for _, d in monster:GetChildren() do
@@ -1515,7 +1540,7 @@ pcall(function()
 		villain.Parent = monster
 		print("[NightShift] villain mesh loaded — The Watcher has a new face")
 	end
-end)
+end) end)
 
 local monsterPos = Vector3.new(0, 3.5, 0)
 local feastUntil = 0
