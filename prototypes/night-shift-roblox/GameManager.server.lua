@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "1.3.0-complete"
+local GAME_VERSION = "1.4.0-quadrants"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -60,19 +60,23 @@ end
 -- the game is allowed to load them. Any ID left as 0 keeps the built-in
 -- procedural version — nothing breaks while IDs are missing.
 local IMPORTED_ASSETS = {
-	villain = 89840865172931, -- "mop" -> becomes The Watcher
-	flashlight = 94078352716367, -- "flash light"
-	terrainGround = 0, -- "terrain" mesh disabled: Phase 1 ground is the hand-built crater/ridge voxel design (was 89317303583763)
+	-- Correction from the earlier guess: "mop" is a grimy wooden-handle
+	-- mop model, not a monster — it's the flashlight now. No uploaded
+	-- mesh is assigned to the Watcher, so it uses an improved
+	-- procedural silhouette (tall, gaunt, faceless) instead.
+	villain = 0,
+	flashlight = 89840865172931, -- "mop" -> replaces the grey flashlight stick
+	terrainGround = 0, -- ground is the hand-built crater/ridge voxel design; "terrain" glb is used as a building below instead
+	-- Quadrant layout: one building per zone, matching the map brief.
+	--   Camp House    -> center (Discussion Hall / safe zone)
+	--   Farm House    -> SE, beside the swamp (Barn zone, generator at the doors)
+	--   Old Casa de Sin -> SW peninsula (Warehouse zone, tight interior)
+	--   Terrain diorama -> NE elevated clearing (Factory zone, 3 entry paths)
 	environments = {
-		-- YOUR assets ARE the map. The same asset is cloned into several
-		-- zones with different footprints and rotations, so every
-		-- structure on the site is one of your imports.
-		{ id = 112181051620055, zone = "Hall", name = "CampHouse", pos = Vector3.new(0, 0, 0), footprint = 52, yaw = 180 }, -- Discussion Hall (center)
-		{ id = 101577288469591, zone = "Farm", name = "FarmHouseAndLake", pos = Vector3.new(70, 0, -60), footprint = 60, yaw = 0 }, -- SE, beside the swamp
-		{ id = 131157036777467, zone = "Casa", name = "OldCasaDeSin", pos = Vector3.new(-76, 0, -62), footprint = 56, yaw = 0 }, -- SW
-		{ id = 131157036777467, zone = "NorthCabin", name = "NorthCabin", pos = Vector3.new(-38, 0, 72), footprint = 40, yaw = 90 }, -- N (casa clone)
-		{ id = 101577288469591, zone = "Homestead", name = "EastHomestead", pos = Vector3.new(105, 0, -8), footprint = 44, yaw = 270 }, -- E (farm clone)
-		{ id = 112181051620055, zone = "RangerStation", name = "RangerStation", pos = Vector3.new(-95, 0, 20), footprint = 40, yaw = 45 }, -- W (camp house clone)
+		{ id = 112181051620055, zone = "Hall", name = "CampHouse", pos = Vector3.new(0, 0, 0), footprint = 52, yaw = 180 },
+		{ id = 101577288469591, zone = "Farm", name = "FarmHouseAndLake", pos = Vector3.new(60, 0, -58), footprint = 58, yaw = 20 },
+		{ id = 131157036777467, zone = "Casa", name = "OldCasaDeSin", pos = Vector3.new(-62, 0, -50), footprint = 54, yaw = 200 },
+		{ id = 89317303583763, zone = "Factory", name = "FactoryDiorama", pos = Vector3.new(95, 0, 55), footprint = 62, yaw = 300 },
 	},
 }
 
@@ -92,12 +96,12 @@ local LOBBY_COUNTDOWN = 10
 -- so "gen at the junkyard" means something and no two are ever visible
 -- from one spot through the fog.
 local GEN_POSITIONS = {
-	Vector3.new(55, 0, -50), -- at the Farm
-	Vector3.new(35, 0, -100), -- Swamp edge
-	Vector3.new(-62, 0, -50), -- at Casa de Sin
-	Vector3.new(-30, 0, 60), -- at the North Cabin
-	Vector3.new(92, 0, -6), -- at the East Homestead
-	Vector3.new(-80, 0, 32), -- at the Ranger Station
+	Vector3.new(55, 0, -50), -- SE: at the Farm (in the barn's open double doors)
+	Vector3.new(35, 0, -100), -- S: Swamp edge
+	Vector3.new(-62, 0, -50), -- SW: at Casa de Sin (interior, roofed)
+	Vector3.new(-30, 0, 60), -- NW: at the North Cabin (Coal Mines flavor)
+	Vector3.new(95, 0, 55), -- NE: at the Factory (elevated clearing, 3 approaches)
+	Vector3.new(-80, 0, 32), -- W: at the Ranger Station
 }
 local GENERATOR_COUNT = #GEN_POSITIONS
 local GEN_DECAY_PER_SEC = 4 -- night only
@@ -948,6 +952,100 @@ end
 
 print("[NightShift] map: village complete")
 
+-- ===================== PHASE 3B: LANDMARK BUILDINGS (your imports) =====================
+-- Your uploaded structures claim their quadrant, per the map brief:
+-- Camp House center, Farm House SE (barn), Old Casa de Sin SW
+-- (warehouse), the "terrain" diorama NE (factory). If an import fails
+-- to load, a fallback shed stands in — a zone is never left as just
+-- an open generator in a field. Camp House replaces the procedural
+-- Discussion Hall shell above; the other three add to the village.
+print("[NightShift] map: landmarks…")
+for _, env in IMPORTED_ASSETS.environments do
+	local model = loadImportedModel(env.id)
+	if model then
+		model.Name = env.name
+		placeImported(model, env.pos, env.footprint, env.yaw)
+		model.Parent = structuresFolder
+		if env.zone == "Hall" then
+			local oldHall = structuresFolder:FindFirstChild("DiscussionHall")
+			if oldHall then
+				oldHall:Destroy()
+			end
+		end
+		hangLantern(env.pos + Vector3.new(env.footprint / 2 + 2, 0, 0), lanternsFolder)
+		print("[NightShift] map: imported " .. env.name .. " into the " .. env.zone .. " zone")
+	elseif env.zone ~= "Hall" then
+		buildCottage(env.name .. "Fallback", env.pos, env.footprint * 0.5, env.footprint * 0.4, 10, "S", structuresFolder)
+		print("[NightShift] map: " .. env.name .. " import unavailable — built a fallback shed")
+	end
+end
+
+-- ---- The Factory zone: industrial dressing from the Creator Store ----
+-- Rusty piping, exposed brickwork, and a chainlink perimeter with
+-- three deliberate gaps, so the zone always has multiple approaches
+-- regardless of whether the diorama import above landed.
+do
+	local FACTORY_CENTER = Vector3.new(95, 0, 55)
+	local industrialFolder = mapFolder("Industrial")
+	local INDUSTRIAL_ASSETS = {
+		fence = 109950272021933, -- Metal Chainlink Fence
+		pipe = 9632742593, -- Metal Pipe
+		brickWall = 129612305307295, -- Ruined Brick Wall
+		brickPile = 132494932912007, -- Ruined Brick Pile
+	}
+	local fenceTemplate = loadImportedModel(INDUSTRIAL_ASSETS.fence)
+	local pipeTemplate = loadImportedModel(INDUSTRIAL_ASSETS.pipe)
+	local brickWallTemplate = loadImportedModel(INDUSTRIAL_ASSETS.brickWall)
+	local brickPileTemplate = loadImportedModel(INDUSTRIAL_ASSETS.brickPile)
+
+	local function cloneTemplate(template: Model?, pos: Vector3, targetSize: number, yaw: number, folder: Folder)
+		if not template then
+			return
+		end
+		local clone = template:Clone()
+		local ext = clone:GetExtentsSize()
+		pcall(function()
+			clone:ScaleTo(targetSize / math.max(ext.X, ext.Y, ext.Z, 0.1))
+		end)
+		clone:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.rad(yaw), 0))
+		local bbCF, bbSize = clone:GetBoundingBox()
+		clone:PivotTo(clone:GetPivot() + Vector3.new(0, groundY(pos.X, pos.Z) - (bbCF.Position.Y - bbSize.Y / 2), 0))
+		clone.Parent = folder
+	end
+
+	local rng = Random.new(83)
+	-- Perimeter ring with three gaps -- the three approach paths.
+	local segments = 16
+	local gapIndices = { [2] = true, [7] = true, [12] = true }
+	for i = 0, segments - 1 do
+		if not gapIndices[i] then
+			local angle = (i / segments) * math.pi * 2
+			local pos = FACTORY_CENTER + Vector3.new(math.cos(angle), 0, math.sin(angle)) * 34
+			cloneTemplate(fenceTemplate, pos, 9, math.deg(angle) + 90, industrialFolder)
+		end
+	end
+	-- Rusty pipe runs and brick rubble scattered through the interior.
+	for _ = 1, 8 do
+		local pos = FACTORY_CENTER + Vector3.new(rng:NextNumber(-24, 24), 0, rng:NextNumber(-24, 24))
+		cloneTemplate(pipeTemplate, pos, rng:NextNumber(6, 10), rng:NextNumber(0, 360), industrialFolder)
+	end
+	for _ = 1, 5 do
+		local pos = FACTORY_CENTER + Vector3.new(rng:NextNumber(-28, 28), 0, rng:NextNumber(-28, 28))
+		cloneTemplate(brickWallTemplate, pos, rng:NextNumber(8, 13), rng:NextNumber(0, 360), industrialFolder)
+	end
+	for _ = 1, 6 do
+		local pos = FACTORY_CENTER + Vector3.new(rng:NextNumber(-30, 30), 0, rng:NextNumber(-30, 30))
+		cloneTemplate(brickPileTemplate, pos, rng:NextNumber(4, 7), rng:NextNumber(0, 360), industrialFolder)
+	end
+	-- Decaying concrete ruins flavor at Old Casa de Sin (SW) too.
+	for _ = 1, 6 do
+		local pos = Vector3.new(-62, 0, -50) + Vector3.new(rng:NextNumber(-26, 26), 0, rng:NextNumber(-26, 26))
+		cloneTemplate(brickPileTemplate, pos, rng:NextNumber(4, 7), rng:NextNumber(0, 360), industrialFolder)
+	end
+	print("[NightShift] map: factory industrial dressing placed")
+end
+
+
 -- ===================== PHASE 2: FOREST =====================
 -- Gnarled trees threaded through the trench maze and massed into the
 -- wilderness beyond the bluff. Mesh pines from the Creator Store when
@@ -959,11 +1057,14 @@ local forestFolder = mapFolder("Forest")
 -- Spots the forest must not swallow: the crater, every village site,
 -- every generator alcove, and the gravel roads.
 local FOREST_KEEP_CLEAR: { { number } } = {
-	{ 0, 0, 40 }, -- crater + Discussion Hall
+	{ 0, 0, 40 }, -- crater + Discussion Hall (Camp House)
 	{ 112, 42, 18 }, { -108, -18, 18 }, { 22, 112, 18 }, { -44, -102, 18 }, -- cottages
 	{ 28, 34, 16 }, -- smithy + props
 	{ 100, -66, 14 }, -- mill
+	{ 60, -58, 34 }, -- Farm House & Lake (barn zone)
 	{ 55, -95, 28 }, -- swamp pond + dock + reeds
+	{ -62, -50, 32 }, -- Old Casa de Sin (warehouse zone)
+	{ 95, 55, 38 }, -- The Factory (diorama + industrial clutter)
 	{ -30, -22, 16 }, -- garden
 	{ 118, 67, 20 }, -- orchard
 }
@@ -1507,27 +1608,45 @@ Players.PlayerRemoving:Connect(function(player)
 end)
 
 -- ===================== MONSTER (The Watcher) =====================
+-- A tall, gaunt, faceless silhouette — no uploaded mesh is assigned to
+-- it (the "mop" asset turned out to be a flashlight, not a monster),
+-- so this procedural design replaces the old boxy body-with-eyes.
 local monster = Instance.new("Model")
 monster.Name = "TheWatcher"
 local core = Instance.new("Part")
 core.Name = "Core"
-core.Size = Vector3.new(2.4, 6.5, 1.8)
-core.Color = Color3.fromRGB(5, 5, 8)
+core.Size = Vector3.new(1.6, 8.5, 1.1)
+core.Color = Color3.fromRGB(6, 6, 9)
 core.Material = Enum.Material.Slate
 core.Anchored = true
 core.CanCollide = false
 core.Parent = monster
-for _, offset in { Vector3.new(-0.45, 2.5, -0.95), Vector3.new(0.45, 2.5, -0.95) } do
-	local eye = Instance.new("Part")
-	eye.Shape = Enum.PartType.Ball
-	eye.Size = Vector3.new(0.35, 0.35, 0.35)
-	eye.Color = Color3.fromRGB(255, 40, 40)
-	eye.Material = Enum.Material.Neon
-	eye.Anchored = true
-	eye.CanCollide = false
-	eye.CFrame = core.CFrame * CFrame.new(offset)
-	eye.Parent = monster
+
+-- Small, featureless head — no eyes, no face.
+local head = Instance.new("Part")
+head.Name = "Head"
+head.Size = Vector3.new(1, 1.3, 1)
+head.Color = core.Color
+head.Material = Enum.Material.Slate
+head.Anchored = true
+head.CanCollide = false
+head.CFrame = core.CFrame * CFrame.new(0, core.Size.Y / 2 + 0.6, 0)
+head.Parent = monster
+
+-- Long, thin arms hanging past where knees would be — the classic
+-- gaunt-stalker silhouette.
+for _, side in { -1, 1 } do
+	local arm = Instance.new("Part")
+	arm.Name = "Arm"
+	arm.Size = Vector3.new(0.4, 7.5, 0.4)
+	arm.Color = core.Color
+	arm.Material = Enum.Material.Slate
+	arm.Anchored = true
+	arm.CanCollide = false
+	arm.CFrame = core.CFrame * CFrame.new(side * (core.Size.X / 2 + 0.3), -1.2, 0) * CFrame.Angles(0, 0, math.rad(side * 4))
+	arm.Parent = monster
 end
+
 monster.PrimaryPart = core
 
 local monsterGrowlSound = makeSound({
@@ -1539,10 +1658,11 @@ local monsterHome = CFrame.new(0, -80, 0) -- hidden below the map by day
 monster:PivotTo(monsterHome)
 monster.Parent = Workspace
 
--- Your imported VILAN.glb replaces the placeholder box-and-eyes Watcher.
--- The invisible Core part stays: it drives movement and the kill radius.
--- Loaded in the background — the Watcher hunts with its placeholder
--- look immediately and gets its new face whenever the mesh arrives.
+-- Dormant hook: if IMPORTED_ASSETS.villain is ever set to a real
+-- uploaded mesh, it replaces the procedural body below (Core stays
+-- invisible and keeps driving movement/kill detection). Currently 0 —
+-- "mop" turned out to be the flashlight, not a monster — so this
+-- never fires and the procedural silhouette above is what hunts.
 task.spawn(function() pcall(function()
 	local villain = loadImportedModel(IMPORTED_ASSETS.villain)
 	if villain then
@@ -1593,6 +1713,26 @@ local function killPlayer(c: Crew, cause: string)
 	stinger("killStinger")
 end
 
+-- Closest point on the gravel road network to (x, z) — lets the
+-- Watcher stalk along the dark dirt roads connecting the zones rather
+-- than beelining cross-country every time.
+local function nearestRoadPoint(x: number, z: number): Vector3?
+	local best, bestDist = nil, math.huge
+	for _, seg in ROAD_SEGMENTS do
+		local a, b = seg[1], seg[2]
+		local abX, abZ = b.X - a.X, b.Z - a.Z
+		local denom = math.max(abX * abX + abZ * abZ, 0.001)
+		local t = math.clamp(((x - a.X) * abX + (z - a.Z) * abZ) / denom, 0, 1)
+		local cx, cz = a.X + abX * t, a.Z + abZ * t
+		local d = (x - cx) * (x - cx) + (z - cz) * (z - cz)
+		if d < bestDist then
+			bestDist = d
+			best = Vector3.new(cx, 0, cz)
+		end
+	end
+	return best
+end
+
 local function monsterStep(dt: number)
 	local now = os.clock()
 	if now < feastUntil then return end
@@ -1630,15 +1770,40 @@ local function monsterStep(dt: number)
 	if target then
 		goal = charPos(target.player) or monsterPos
 	else
-		-- Everyone is huddled in the safe zone: circle the lamp menacingly.
+		-- Everyone is huddled in the safe zone: circle the lamp menacingly
+		-- from just outside it — never crossing into the light.
 		local angle = now * 0.5
-		goal = Vector3.new(math.cos(angle), 0, math.sin(angle)) * (SAFE_ZONE_RADIUS + 6)
+		goal = Vector3.new(math.cos(angle), 0, math.sin(angle)) * (SAFE_ZONE_RADIUS + 10)
+	end
+
+	-- Stalk the road network on the way to a distant target, instead of
+	-- beelining cross-country — it closes in for the kill once near.
+	if target then
+		local distToGoal = (Vector3.new(goal.X - monsterPos.X, 0, goal.Z - monsterPos.Z)).Magnitude
+		if distToGoal > 24 then
+			local roadPoint = nearestRoadPoint(monsterPos.X, monsterPos.Z)
+			if roadPoint then
+				goal = goal:Lerp(roadPoint, 0.4)
+			end
+		end
 	end
 
 	local delta = Vector3.new(goal.X - monsterPos.X, 0, goal.Z - monsterPos.Z)
 	if delta.Magnitude > 0.1 then
 		local step = delta.Unit * math.min(speed * dt, delta.Magnitude)
-		monsterPos = Vector3.new(monsterPos.X + step.X, groundY(monsterPos.X + step.X, monsterPos.Z + step.Z) + 2.8, monsterPos.Z + step.Z)
+		local nx, nz = monsterPos.X + step.X, monsterPos.Z + step.Z
+		-- Avoid the Camp House's light — but only while it's actually
+		-- providing protection. If the generators are down and the safe
+		-- zone has failed, the light is worthless and this must NOT
+		-- block the Watcher from reaching players sheltering there.
+		if safeZoneActive() then
+			local fromCenter = math.sqrt(nx * nx + nz * nz)
+			local minRadius = SAFE_ZONE_RADIUS + 6
+			if fromCenter < minRadius and fromCenter > 0.01 then
+				nx, nz = nx / fromCenter * minRadius, nz / fromCenter * minRadius
+			end
+		end
+		monsterPos = Vector3.new(nx, groundY(nx, nz) + 5.0, nz)
 		monster:PivotTo(CFrame.lookAt(monsterPos, monsterPos + delta.Unit))
 	end
 
@@ -1912,7 +2077,7 @@ local function runMatch()
 		setNight()
 		-- The Watcher emerges beside a random far-off generator.
 		local emergeAt = GEN_POSITIONS[math.random(GENERATOR_COUNT)]
-		monsterPos = Vector3.new(emergeAt.X, groundY(emergeAt.X, emergeAt.Z) + 2.8, emergeAt.Z)
+		monsterPos = Vector3.new(emergeAt.X, groundY(emergeAt.X, emergeAt.Z) + 5.0, emergeAt.Z)
 		timeLeft = NIGHT_SECONDS
 		Feed:FireAllClients("🌑 NIGHT " .. night .. ". It is here. Stay in the light.")
 		if not monsterGrowlSound.IsPlaying then monsterGrowlSound:Play() end
