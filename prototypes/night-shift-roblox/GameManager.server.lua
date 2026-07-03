@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "1.2.0-village"
+local GAME_VERSION = "1.3.0-complete"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -947,6 +947,227 @@ do
 end
 
 print("[NightShift] map: village complete")
+
+-- ===================== PHASE 2: FOREST =====================
+-- Gnarled trees threaded through the trench maze and massed into the
+-- wilderness beyond the bluff. Mesh pines from the Creator Store when
+-- they load in time; part-built pines otherwise. Every tree is planted
+-- at true ground height, so they climb the ridges naturally.
+print("[NightShift] map: forest…")
+local forestFolder = mapFolder("Forest")
+
+-- Spots the forest must not swallow: the crater, every village site,
+-- every generator alcove, and the gravel roads.
+local FOREST_KEEP_CLEAR: { { number } } = {
+	{ 0, 0, 40 }, -- crater + Discussion Hall
+	{ 112, 42, 18 }, { -108, -18, 18 }, { 22, 112, 18 }, { -44, -102, 18 }, -- cottages
+	{ 28, 34, 16 }, -- smithy + props
+	{ 100, -66, 14 }, -- mill
+	{ 55, -95, 28 }, -- swamp pond + dock + reeds
+	{ -30, -22, 16 }, -- garden
+	{ 118, 67, 20 }, -- orchard
+}
+
+local function nearRoad(x: number, z: number, dist: number): boolean
+	for _, seg in ROAD_SEGMENTS do
+		local a, b = seg[1], seg[2]
+		local abX, abZ = b.X - a.X, b.Z - a.Z
+		local denom = math.max(abX * abX + abZ * abZ, 0.001)
+		local t = math.clamp(((x - a.X) * abX + (z - a.Z) * abZ) / denom, 0, 1)
+		local cx, cz = a.X + abX * t, a.Z + abZ * t
+		if (x - cx) * (x - cx) + (z - cz) * (z - cz) < dist * dist then
+			return true
+		end
+	end
+	return false
+end
+
+local function forestSpotFree(x: number, z: number): boolean
+	for _, s in FOREST_KEEP_CLEAR do
+		if (x - s[1]) * (x - s[1]) + (z - s[2]) * (z - s[2]) < s[3] * s[3] then
+			return false
+		end
+	end
+	for _, g in GEN_POSITIONS do
+		if (Vector3.new(x, 0, z) - g).Magnitude < 17 then
+			return false
+		end
+	end
+	if nearRoad(x, z, 6) then
+		return false
+	end
+	return true
+end
+
+-- Mesh pine templates: background loads with a 3-second budget, so a
+-- slow fetch can never stall the map. Fallback is the part-built pine.
+local PINE_ASSET_IDS = { 365275430, 5392132809, 73454171742334, 114819172494817, 91802183850152 }
+local pineTemplates: { Model } = {}
+do
+	local pending = #PINE_ASSET_IDS
+	for _, assetId in PINE_ASSET_IDS do
+		task.spawn(function()
+			pcall(function()
+				local asset = InsertService:LoadAsset(assetId)
+				for _, desc in asset:GetDescendants() do
+					if desc:IsA("LuaSourceContainer") then
+						desc:Destroy()
+					elseif desc:IsA("BasePart") then
+						desc.Anchored = true
+					end
+				end
+				for _, child in asset:GetChildren() do
+					if child:IsA("Model") then
+						local hgt = child:GetExtentsSize().Y
+						if hgt >= 8 and hgt <= 200 then
+							table.insert(pineTemplates, child)
+						end
+					end
+				end
+			end)
+			pending -= 1
+		end)
+	end
+	local waited = 0
+	while pending > 0 and waited < 3 do
+		task.wait(0.1)
+		waited += 0.1
+	end
+	print("[NightShift] map: " .. #pineTemplates .. " pine mesh templates ready")
+end
+
+local function makePartPine(rng: Random, x: number, z: number)
+	local y = groundY(x, z)
+	local height = rng:NextNumber(13, 24)
+	part({ Parent = forestFolder, Name = "PineTrunk", Size = Vector3.new(1.3, height * 0.42, 1.3),
+		Position = Vector3.new(x, y + height * 0.21, z), Color = Color3.fromRGB(52, 42, 32), Material = Enum.Material.Wood })
+	local width = height * 0.44
+	local layerY = y + height * 0.38
+	for _ = 1, 4 do
+		part({ Parent = forestFolder, Name = "PineFoliage", Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(height * 0.19, width, width),
+			CFrame = CFrame.new(x, layerY, z) * CFrame.Angles(0, 0, math.rad(90)),
+			Color = Color3.fromRGB(42 + rng:NextInteger(0, 8), 48 + rng:NextInteger(0, 8), 34),
+			Material = Enum.Material.LeafyGrass, CanCollide = false })
+		width *= 0.68
+		layerY += height * 0.17
+	end
+end
+
+local function plantTree(rng: Random, x: number, z: number)
+	if #pineTemplates == 0 then
+		makePartPine(rng, x, z)
+		return
+	end
+	local tree = pineTemplates[rng:NextInteger(1, #pineTemplates)]:Clone()
+	local currentHeight = tree:GetExtentsSize().Y
+	if currentHeight > 1 then
+		pcall(function()
+			tree:ScaleTo(rng:NextNumber(15, 30) / currentHeight)
+		end)
+	end
+	tree:PivotTo(CFrame.new(x, 0, z) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0))
+	local bbCF, bbSize = tree:GetBoundingBox()
+	local bottom = bbCF.Position.Y - bbSize.Y / 2
+	tree:PivotTo(tree:GetPivot() + Vector3.new(0, groundY(x, z) - bottom - 0.6, 0))
+	tree.Parent = forestFolder
+end
+
+do
+	local rng = Random.new(67)
+	-- Trees threaded through the trench maze between crater and bluff.
+	local planted = 0
+	for _ = 1, 190 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local radius = rng:NextNumber(58, 124)
+		local x, z = math.cos(angle) * radius, math.sin(angle) * radius
+		if forestSpotFree(x, z) then
+			plantTree(rng, x, z)
+			planted += 1
+		end
+	end
+	-- The wilderness beyond the bluff: the woods keep going into the fog.
+	for _ = 1, 220 do
+		local angle = rng:NextNumber(0, math.pi * 2)
+		local radius = rng:NextNumber(158, 420)
+		plantTree(rng, math.cos(angle) * radius, math.sin(angle) * radius)
+	end
+	print("[NightShift] map: forest planted (" .. planted .. " in the core)")
+end
+
+-- ===================== PHASE 4: COVER & TRENCH MIST =====================
+-- Sabotage cover at every generator alcove, and the terrain brief's
+-- "earth actively bleeds mist from its low-lying trenches".
+print("[NightShift] map: cover & mist…")
+local coverFolder = mapFolder("Cover")
+
+do
+	local rng = Random.new(71)
+	for _, g in GEN_POSITIONS do
+		local y = groundY(g.X, g.Z)
+		for c = 1, 2 do
+			local angle = rng:NextNumber(0, math.pi * 2)
+			local off = Vector3.new(math.cos(angle), 0, math.sin(angle)) * rng:NextNumber(6, 9)
+			local s = rng:NextNumber(3, 4.2)
+			part({ Parent = coverFolder, Name = "Crate", Size = Vector3.new(s, s, s),
+				CFrame = CFrame.new(g.X + off.X, y + s / 2, g.Z + off.Z)
+					* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0),
+				Color = Color3.fromRGB(78, 64, 48), Material = Enum.Material.WoodPlanks })
+		end
+		part({ Parent = coverFolder, Name = "Barrel", Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(3.2, 2.4, 2.4),
+			CFrame = CFrame.new(g.X - 7, y + 1.6, g.Z + 5) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), math.rad(90)),
+			Color = Color3.fromRGB(84, 58, 40), Material = Enum.Material.CorrodedMetal })
+	end
+end
+
+pcall(function()
+	local rng = Random.new(73)
+	for i = 1, 14 do
+		local angle = (i / 14) * math.pi * 2
+		local radius = rng:NextNumber(64, 118)
+		local x, z = math.cos(angle) * radius, math.sin(angle) * radius
+		local anchor = part({ Parent = coverFolder, Name = "MistEmitter", Size = Vector3.new(1, 1, 1),
+			Position = Vector3.new(x, groundY(x, z) + 1.5, z), Transparency = 1, CanCollide = false })
+		local mist = Instance.new("ParticleEmitter")
+		mist.Texture = "rbxasset://textures/particles/smoke_main.dds"
+		mist.Size = NumberSequence.new(rng:NextNumber(10, 16), rng:NextNumber(18, 24))
+		mist.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.3, 0.78),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		mist.Color = ColorSequence.new(Color3.fromRGB(140, 150, 142))
+		mist.Lifetime = NumberRange.new(7, 12)
+		mist.Rate = 2
+		mist.Speed = NumberRange.new(0.3, 1)
+		mist.SpreadAngle = Vector2.new(180, 12)
+		mist.Rotation = NumberRange.new(0, 360)
+		mist.RotSpeed = NumberRange.new(-3, 3)
+		mist.LightInfluence = 1
+		mist.Parent = anchor
+	end
+	-- The crater itself breathes.
+	local craterAnchor = part({ Parent = coverFolder, Name = "CraterMist", Size = Vector3.new(1, 1, 1),
+		Position = Vector3.new(0, groundY(0, 0) + 1, 0), Transparency = 1, CanCollide = false })
+	local craterMist = Instance.new("ParticleEmitter")
+	craterMist.Texture = "rbxasset://textures/particles/smoke_main.dds"
+	craterMist.Size = NumberSequence.new(20, 30)
+	craterMist.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.3, 0.85),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	craterMist.Color = ColorSequence.new(Color3.fromRGB(140, 150, 142))
+	craterMist.Lifetime = NumberRange.new(9, 14)
+	craterMist.Rate = 1.5
+	craterMist.Speed = NumberRange.new(0.2, 0.8)
+	craterMist.SpreadAngle = Vector2.new(180, 10)
+	craterMist.LightInfluence = 1
+	craterMist.Parent = craterAnchor
+end)
+
+print("[NightShift] map: ALL PHASES COMPLETE — the trial ground is finished")
 
 -- ---- Stage 5: generators (one per named zone) ----
 local function buildGenerators()
