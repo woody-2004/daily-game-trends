@@ -18,7 +18,7 @@ local SoundService = game:GetService("SoundService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 
-local GAME_VERSION = "0.12.1"
+local GAME_VERSION = "1.0.0-phase1"
 print("[NightShift] GameManager " .. GAME_VERSION .. " starting…")
 
 Players.CharacterAutoLoads = false
@@ -197,11 +197,9 @@ end
 
 -- ===================== MAP BUILD (staged) =====================
 -- One large outdoor industrial site, built in stages, each into its own
--- Workspace folder: Terrain -> Forest -> Buildings -> Props (generators
--- and clutter have their own sections below; spawns live in the hall).
--- Design rules: players never see the whole map, every objective has
--- multiple approaches, landmarks (water tower, chimneys) mark the way.
-
+-- Workspace folders. Only SpawnLocations exists for now — Forest,
+-- Buildings, and Props folders return in their respective rebuild
+-- phases (see the PHASE ROADMAP comment further down).
 local function mapFolder(name: string): Folder
 	local f = Instance.new("Folder")
 	f.Name = name
@@ -209,42 +207,9 @@ local function mapFolder(name: string): Folder
 	return f
 end
 
-local forestFolder = mapFolder("Forest")
-local buildingsFolder = mapFolder("Buildings")
-local propsFolder = mapFolder("Props")
-local rocksFolder = mapFolder("Rocks")
 local spawnsFolder = mapFolder("SpawnLocations")
 
--- Rectangles scenery must stay out of: { centerX, centerZ, halfW, halfD }
-local KEEP_CLEAR: { { number } } = {
-	{ 0, 0, 28, 26 }, -- Discussion Hall (camp house)
-	{ 70, -60, 32, 30 }, -- Farm house and lake
-	{ -76, -62, 30, 30 }, -- Old Casa de Sin
-	{ -38, 72, 22, 22 }, -- North Cabin
-	{ 105, -8, 24, 24 }, -- East Homestead
-	{ -95, 20, 22, 22 }, -- Ranger Station
-	{ 55, -95, 18, 14 }, -- Swamp pond
-}
-
-local function insideKeepClear(pos: Vector3): boolean
-	for _, r in KEEP_CLEAR do
-		if math.abs(pos.X - r[1]) < r[3] and math.abs(pos.Z - r[2]) < r[4] then
-			return true
-		end
-	end
-	return false
-end
-
-local function nearGenerator(pos: Vector3, dist: number): boolean
-	for _, g in GEN_POSITIONS do
-		if (pos - g).Magnitude < dist then
-			return true
-		end
-	end
-	return false
-end
-
--- ---- Imported-asset loader (used by environments, villain, flashlight) ----
+-- ---- Imported-asset loader (used by terrain, villain, flashlight) ----
 local InsertService = game:GetService("InsertService")
 
 local function loadImportedModel(assetId: number): Model?
@@ -324,16 +289,21 @@ local function groundY(x: number, z: number): number
 end
 groundYForward = groundY
 
--- ---- Stage 1: terrain (your imported mesh is the actual floor) ----
+-- ---- Stage 1: terrain ----
+-- PHASE 1 of the rebuild. Just the ground: continuous rolling hills,
+-- mixed grass/mud/rock materials, dirt roads, a swamp and a creek.
+-- No forest, buildings, or props yet — those are later phases, added
+-- once this phase reads right on its own.
 print("[NightShift] map: terrain…")
+
 -- Safety net: invisible slab just under the ground, so a terrain
 -- failure can never drop players into the void.
 local safetyFloor = part({ Name = "SafetyFloor", Size = Vector3.new(ARENA_SIZE + 20, 2, ARENA_SIZE + 20),
 	Position = Vector3.new(0, -0.2, 0), Transparency = 1 })
 addGroundInstance(safetyFloor)
 
--- Imports (your .glb assets) can be large and slow to fetch — loading
--- them must NEVER block the map from finishing or the game from being
+-- Your imported "terrain" .glb can be large and slow to fetch — loading
+-- it must NEVER block the map from finishing or the game from being
 -- playable. The voxel ground below always builds immediately; this
 -- import loads in the background and, if it arrives, is layered in as
 -- the visible top surface once it's ready (no waiting on it here).
@@ -363,7 +333,8 @@ pcall(function()
 	(terrain :: any).GrassLength = 1
 end)
 
--- Every road segment is recorded so trees and clutter never sit on a road.
+-- Every road segment is recorded so later phases (forest, props) can
+-- keep their scenery off the paths.
 local ROAD_SEGMENTS: { { Vector3 } } = {}
 
 local function roadStrip(a: Vector3, b: Vector3)
@@ -396,87 +367,90 @@ local function curvedRoad(a: Vector3, b: Vector3, bend: number)
 	end
 end
 
-local function nearRoad(pos: Vector3, dist: number): boolean
-	for _, seg in ROAD_SEGMENTS do
-		local a, b = seg[1], seg[2]
-		local ab = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
-		local t = math.clamp(Vector3.new(pos.X - a.X, 0, pos.Z - a.Z):Dot(ab) / math.max(ab:Dot(ab), 0.001), 0, 1)
-		local closest = a + ab * t
-		if (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(closest.X, 0, closest.Z)).Magnitude < dist then
-			return true
-		end
-	end
-	return false
-end
-
-local function scenerySpotFree(pos: Vector3): boolean
-	if pos.Magnitude < SAFE_ZONE_RADIUS + 6 then
-		return false
-	end
-	if insideKeepClear(pos) then
-		return false
-	end
-	if nearGenerator(pos, 9) then
-		return false
-	end
-	if nearRoad(pos, 6) then
-		return false
-	end
-	return true
-end
-
-
 -- Always runs immediately (fast native terrain ops, no asset loads):
--- base ground, roads, hills, generator flattening, swamp, creek. This
--- is the floor the game is instantly playable on; the imported terrain
--- mesh above layers in as decoration on top whenever it finishes
--- loading, but gameplay never waits on it.
+-- base ground, rolling hills everywhere (not just the corners), mixed
+-- materials, roads, generator flattening, swamp, creek. This is the
+-- floor the game is instantly playable on.
 pcall(function()
+	-- Deep, wide base extending far past the fence line so the ground
+	-- reaches the horizon in every direction — never a floating island.
 	terrain:FillBlock(CFrame.new(0, -19, 0), Vector3.new(ARENA_SIZE + 200, 40, ARENA_SIZE + 200), Enum.Material.Ground)
+
 	local rng = Random.new(7)
-	-- Overgrown grass patches.
-	for _ = 1, 110 do
-		terrain:FillBlock(CFrame.new(rng:NextNumber(-118, 118), -0.9, rng:NextNumber(-118, 118))
-			* CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
-			Vector3.new(rng:NextNumber(10, 28), 4, rng:NextNumber(10, 28)), Enum.Material.Grass)
+
+	-- Continuous rolling hills across the WHOLE site, not just the
+	-- corners: many overlapping, shallow mounds so the ground undulates
+	-- everywhere you walk, the way real terrain does.
+	for _ = 1, 46 do
+		local x = rng:NextNumber(-125, 125)
+		local z = rng:NextNumber(-125, 125)
+		local r = rng:NextNumber(14, 30)
+		terrain:FillBall(Vector3.new(x, 1 - r * rng:NextNumber(0.45, 0.62), z), r, Enum.Material.Ground)
 	end
-	-- Gentle hills: mostly-buried spheres read as mounds, not walls.
+	-- A few taller hills toward the edges, for a horizon silhouette.
 	for _, h in {
-		{ -100, -100, 20 }, { 105, -65, 18 }, { -105, 65, 18 }, { 100, 100, 20 },
-		{ -60, 105, 16 }, { 60, -110, 16 }, { -110, -40, 14 },
+		{ -100, -100, 24 }, { 105, -65, 20 }, { -105, 65, 20 }, { 100, 100, 24 },
+		{ -60, 105, 18 }, { 60, -110, 18 }, { -110, -40, 16 },
 	} do
-		terrain:FillBall(Vector3.new(h[1], 1 - h[3] * 0.6, h[2]), h[3], Enum.Material.Ground)
+		terrain:FillBall(Vector3.new(h[1], 1 - h[3] * 0.58, h[2]), h[3], Enum.Material.Ground)
 	end
-	-- Dirt berms inside the map: subtle rises that break sightlines.
+	-- Dirt berms: subtle interior rises that break sightlines at
+	-- ground level even where nothing else is built yet.
 	for _, b in {
 		{ 32, -28, 10 }, { -42, 48, 9 }, { 58, 82, 10 }, { 42, -20, 9 },
 		{ -55, 58, 9 }, { 30, 12, 8 }, { 14, 58, 8 }, { -15, -40, 9 }, { -45, -25, 9 },
 	} do
 		terrain:FillBall(Vector3.new(b[1], 1 - b[3] * 0.55, b[2]), b[3], Enum.Material.Ground)
 	end
+
+	-- Ground cover variety: base Grass, overgrown LeafyGrass patches
+	-- (taller, decorated blades — the "tall grass" look), bare dirt
+	-- clearings, and mossy rock outcrops on a few hilltops.
+	for _ = 1, 90 do
+		local mat = Enum.Material.Grass
+		local roll = rng:NextNumber()
+		if roll > 0.62 then
+			mat = Enum.Material.LeafyGrass
+		elseif roll > 0.5 then
+			mat = Enum.Material.Ground
+		end
+		terrain:FillBlock(CFrame.new(rng:NextNumber(-118, 118), -0.9, rng:NextNumber(-118, 118))
+			* CFrame.Angles(0, math.rad(rng:NextNumber(0, 180)), 0),
+			Vector3.new(rng:NextNumber(10, 26), 4, rng:NextNumber(10, 26)), mat)
+	end
+	for _ = 1, 10 do
+		terrain:FillBall(Vector3.new(rng:NextNumber(-110, 110), rng:NextNumber(2, 8), rng:NextNumber(-110, 110)),
+			rng:NextNumber(6, 11), Enum.Material.Rock)
+	end
+
 	-- Strict generator placement: flatten and clear every generator
 	-- site so no generator ends up on a slope or inside a hill.
 	for _, g in GEN_POSITIONS do
 		terrain:FillBlock(CFrame.new(g.X, -1.5, g.Z), Vector3.new(16, 5, 16), Enum.Material.Ground)
 		terrain:FillBlock(CFrame.new(g.X, 9, g.Z), Vector3.new(16, 16, 16), Enum.Material.Air)
 	end
+	-- Flatten the center too, for the future Discussion Hall / current
+	-- spawn area.
+	terrain:FillBlock(CFrame.new(0, -1.5, 0), Vector3.new(50, 5, 40), Enum.Material.Ground)
+	terrain:FillBlock(CFrame.new(0, 9, 0), Vector3.new(50, 16, 40), Enum.Material.Air)
+
 	-- Swamp in the SE: shallow water over mud.
 	terrain:FillBlock(CFrame.new(55, -0.4, -95), Vector3.new(34, 3, 26), Enum.Material.Mud)
 	terrain:FillBlock(CFrame.new(55, 0.7, -95), Vector3.new(26, 0.9, 18), Enum.Material.Water)
-	-- Dirt roads: a bent spoke from the hall to every generator, a ring
-	-- around the outside (several looping paths), and the exit road.
+
+	-- Dirt roads: a curved spoke from the center to every generator,
+	-- plus an outer loop trail connecting them, plus an exit road.
 	local HUB = Vector3.new(0, 0, 0)
 	for _, g in GEN_POSITIONS do
 		curvedRoad(HUB, g, rng:NextNumber(14, 30) * (rng:NextInteger(0, 1) == 0 and -1 or 1))
 	end
-	-- Outer loop trail: water tower -> factory -> shed -> swamp ->
-	-- warehouse -> junkyard -> camp -> back (the barn sits on the way).
 	local ring = { 4, 6, 3, 2, 1, 5, 4 }
 	for i = 1, #ring - 1 do
 		curvedRoad(GEN_POSITIONS[ring[i]], GEN_POSITIONS[ring[i + 1]],
 			rng:NextNumber(10, 22) * (rng:NextInteger(0, 1) == 0 and -1 or 1))
 	end
 	curvedRoad(Vector3.new(0, 0, -17), Vector3.new(-14, 0, -122), 16) -- exit road
+
 	-- Creek bed: a shallow walkable ditch running from the swamp east.
 	for _, seg in {
 		{ Vector3.new(66, 0, -90), Vector3.new(95, 0, -70) },
@@ -494,468 +468,22 @@ pcall(function()
 	end
 end)
 
--- ---- Stage 2: forest ----
-print("[NightShift] map: forest…")
+-- ===================== PHASE ROADMAP =====================
+-- Phase 1 (terrain) is above. Everything else was deleted for this
+-- restart and comes back deliberately, one phase at a time:
+--   Phase 2: forest (trees, bushes, threaded through the map)
+--   Phase 3: buildings (Discussion Hall + your imported structures)
+--   Phase 4: props (fences, wrecks, cover, lighting fixtures)
+-- Generators (Stage 5, below) and a minimal spawn area already work
+-- so the game is fully playable while later phases are rebuilt.
 
--- Real pine tree meshes from the Creator Store (first ID is Roblox's
--- own endorsed pine). Loaded in the background with a short time
--- budget — planting NEVER waits indefinitely on a slow/stuck asset
--- fetch; if nothing has arrived in time, the part-built pine fallback
--- takes over and the forest still grows on schedule.
-local PINE_ASSET_IDS = { 365275430, 5392132809, 73454171742334, 114819172494817, 91802183850152 }
-local pineTemplates: { Model } = {}
-local pineLoadsPending = #PINE_ASSET_IDS
-
-for _, assetId in PINE_ASSET_IDS do
-	task.spawn(function()
-		pcall(function()
-			local asset = InsertService:LoadAsset(assetId)
-			for _, d in asset:GetDescendants() do
-				if d:IsA("LuaSourceContainer") then
-					d:Destroy() -- free models never get to run code here
-				elseif d:IsA("BasePart") then
-					d.Anchored = true
-				end
-			end
-			local models: { Model } = {}
-			for _, child in asset:GetChildren() do
-				if child:IsA("Model") then
-					table.insert(models, child)
-				end
-			end
-			if #models == 0 then
-				local wrap = Instance.new("Model")
-				for _, child in asset:GetChildren() do
-					if child:IsA("BasePart") then
-						child.Parent = wrap
-					end
-				end
-				if #wrap:GetChildren() > 0 then
-					table.insert(models, wrap)
-				end
-			end
-			for _, model in models do
-				local h = model:GetExtentsSize().Y
-				if h >= 8 and h <= 200 then
-					table.insert(pineTemplates, model)
-				end
-			end
-		end)
-		pineLoadsPending -= 1
-	end)
-end
-
--- Give the pine fetches up to 3 seconds total; planting proceeds the
--- moment they're all done, or when the budget runs out either way.
-do
-	local waited = 0
-	while pineLoadsPending > 0 and waited < 3 do
-		task.wait(0.1)
-		waited += 0.1
-	end
-end
-print("[NightShift] map: loaded " .. #pineTemplates .. " pine mesh templates (" .. pineLoadsPending .. " still pending, using fallback for those)")
-
-local function makePartPine(rng: Random, pos: Vector3)
-	-- Fallback tiered pine, used only if no mesh templates loaded.
-	pos = Vector3.new(pos.X, groundY(pos.X, pos.Z), pos.Z)
-	local height = rng:NextNumber(14, 26)
-	part({ Parent = forestFolder, Name = "PineTrunk",
-		Size = Vector3.new(1.4, height * 0.42, 1.4),
-		Position = pos + Vector3.new(0, height * 0.21, 0),
-		Color = Color3.fromRGB(58, 44, 32), Material = Enum.Material.Wood })
-	local width = height * 0.46
-	local y = height * 0.38
-	for _ = 1, 4 do
-		part({ Parent = forestFolder, Name = "PineFoliage", Shape = Enum.PartType.Cylinder,
-			Size = Vector3.new(height * 0.2, width, width),
-			CFrame = CFrame.new(pos + Vector3.new(0, y, 0)) * CFrame.Angles(0, 0, math.rad(90)),
-			Color = Color3.fromRGB(34 + rng:NextInteger(0, 10), 58 + rng:NextInteger(0, 10), 38),
-			Material = Enum.Material.LeafyGrass, CanCollide = false })
-		width *= 0.68
-		y += height * 0.17
-	end
-end
-
-local function makePine(rng: Random, pos: Vector3)
-	if #pineTemplates == 0 then
-		makePartPine(rng, pos)
-		return
-	end
-	local tree = pineTemplates[rng:NextInteger(1, #pineTemplates)]:Clone()
-	local currentHeight = tree:GetExtentsSize().Y
-	if currentHeight > 1 then
-		pcall(function()
-			tree:ScaleTo(rng:NextNumber(18, 34) / currentHeight)
-		end)
-	end
-	tree:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0))
-	local bbCF, bbSize = tree:GetBoundingBox()
-	local bottom = bbCF.Position.Y - bbSize.Y / 2
-	tree:PivotTo(tree:GetPivot() + Vector3.new(0, groundY(pos.X, pos.Z) - bottom - 0.6, 0))
-	tree.Parent = forestFolder
-end
-
-do
-	local rng = Random.new(21)
-	-- Dense tree wall around the whole site.
-	for _ = 1, 170 do
-		local angle = rng:NextNumber(0, math.pi * 2)
-		local radius = rng:NextNumber(100, 116)
-		local pos = Vector3.new(math.cos(angle) * radius, FLOOR_TOP, math.sin(angle) * radius)
-		if scenerySpotFree(pos) then
-			makePine(rng, pos)
-		end
-	end
-	-- Outer world: forest continues beyond the fence so the boundary
-	-- reads as "the woods keep going", not the edge of the map.
-	for _ = 1, 130 do
-		local angle = rng:NextNumber(0, math.pi * 2)
-		local radius = rng:NextNumber(126, 175)
-		makePine(rng, Vector3.new(math.cos(angle) * radius, FLOOR_TOP, math.sin(angle) * radius))
-	end
-	-- Dense low bushes: players vanish behind them every few steps.
-	for _ = 1, 90 do
-		local pos = Vector3.new(rng:NextNumber(-114, 114), 0, rng:NextNumber(-114, 114))
-		if scenerySpotFree(pos) then
-			local s = rng:NextNumber(2.4, 4.5)
-			part({ Parent = forestFolder, Name = "Bush", Shape = Enum.PartType.Cylinder,
-				Size = Vector3.new(s * 0.8, s, s),
-				CFrame = CFrame.new(Vector3.new(pos.X, groundY(pos.X, pos.Z) + s * 0.32, pos.Z)) * CFrame.Angles(0, 0, math.rad(90)),
-				Color = Color3.fromRGB(38 + rng:NextInteger(0, 10), 62 + rng:NextInteger(0, 10), 42),
-				Material = Enum.Material.LeafyGrass, CanCollide = false })
-		end
-	end
-	-- Forest pockets between locations, per the map sketch.
-	for _, pocket in {
-		{ -55, 82, 18, 12 }, { 70, 78, 18, 12 }, { -25, -88, 14, 9 },
-		{ 0, -68, 14, 8 }, { 38, 8, 12, 7 }, { -35, -20, 12, 7 },
-	} do
-		for _ = 1, pocket[4] do
-			local pos = Vector3.new(pocket[1] + rng:NextNumber(-pocket[3], pocket[3]), FLOOR_TOP,
-				pocket[2] + rng:NextNumber(-pocket[3], pocket[3]))
-			if scenerySpotFree(pos) then
-				makePine(rng, pos)
-			end
-		end
-	end
-	-- And trees threaded through the whole interior — the forest weaves
-	-- through the map instead of ringing it. Roads, buildings, and
-	-- generator sites stay clear, so paths tunnel through the trees.
-	for _ = 1, 150 do
-		local pos = Vector3.new(rng:NextNumber(-112, 112), FLOOR_TOP, rng:NextNumber(-112, 112))
-		if scenerySpotFree(pos) then
-			makePine(rng, pos)
-		end
-	end
-end
-
--- ---- Stage 3: buildings ----
-print("[NightShift] map: buildings…")
-local WALL_T = 1.2
-
-local function wallSeg(folder: Folder, a: Vector3, b: Vector3, yBottom: number, yTop: number,
-	mat: Enum.Material, color: Color3)
-	local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
-	local len = delta.Magnitude
-	if len < 0.4 or yTop - yBottom < 0.4 then
-		return
-	end
-	local mid = (a + b) / 2
-	local yaw = math.atan2(delta.X, delta.Z)
-	part({ Parent = folder, Name = "Wall", Size = Vector3.new(WALL_T, yTop - yBottom, len),
-		CFrame = CFrame.new(mid.X, (yBottom + yTop) / 2, mid.Z) * CFrame.Angles(0, yaw, 0),
-		Material = mat, Color = color })
-end
-
--- A weathered building shell: concrete pad, four walls with door gaps
--- (and lintels), flat roof with one collapsed panel.
-local function buildingShell(name: string, center: Vector3, w: number, d: number, h: number,
-	doors: { [string]: boolean }, mat: Enum.Material, color: Color3)
-	local f = Instance.new("Folder")
-	f.Name = name
-	f.Parent = buildingsFolder
-	local gy = groundY(center.X, center.Z)
-	part({ Parent = f, Name = "Pad", Size = Vector3.new(w + 2, 0.4, d + 2),
-		Position = Vector3.new(center.X, gy + 0.2, center.Z),
-		Color = Color3.fromRGB(88, 88, 90), Material = Enum.Material.Concrete })
-	local x0, x1 = center.X - w / 2, center.X + w / 2
-	local z0, z1 = center.Z - d / 2, center.Z + d / 2
-	local base, top = gy, gy + h
-	local DOOR_W, DOOR_H = 8, 8
-	for side, ab in {
-		N = { Vector3.new(x0, 0, z1), Vector3.new(x1, 0, z1) },
-		S = { Vector3.new(x0, 0, z0), Vector3.new(x1, 0, z0) },
-		W = { Vector3.new(x0, 0, z0), Vector3.new(x0, 0, z1) },
-		E = { Vector3.new(x1, 0, z0), Vector3.new(x1, 0, z1) },
-	} do
-		local a, b = ab[1], ab[2]
-		if doors[side] then
-			local mid = (a + b) / 2
-			local dir = (b - a).Unit
-			wallSeg(f, a, mid - dir * (DOOR_W / 2), base, top, mat, color)
-			wallSeg(f, mid + dir * (DOOR_W / 2), b, base, top, mat, color)
-			wallSeg(f, mid - dir * (DOOR_W / 2), mid + dir * (DOOR_W / 2), base + DOOR_H, top, mat, color)
-		else
-			wallSeg(f, a, b, base, top, mat, color)
-		end
-	end
-	local rng = Random.new(math.floor(center.X * 31 + center.Z * 7))
-	local skip = rng:NextInteger(1, 4)
-	local n = 0
-	for gx = 0, 1 do
-		for gz = 0, 1 do
-			n += 1
-			if n ~= skip then
-				part({ Parent = f, Name = "Roof", Size = Vector3.new(w / 2 + 1, 0.8, d / 2 + 1),
-					Position = Vector3.new(center.X - w / 4 + gx * (w / 2), top + 0.4, center.Z - d / 4 + gz * (d / 2)),
-					Color = Color3.fromRGB(52, 50, 48), Material = Enum.Material.Metal })
-			end
-		end
-	end
-end
-
--- Your imported .glb environments claim their zones first; procedural
--- structures only fill the zones that have no import yet.
-local importedZones: { [string]: boolean } = {}
-do
-	local templates: { [number]: Model } = {}
-	for _, env in IMPORTED_ASSETS.environments do
-		if env.id ~= 0 then
-			local template = templates[env.id]
-			if not template then
-				template = loadImportedModel(env.id)
-				if template then
-					templates[env.id] = template
-				end
-			end
-			if template then
-				local model = template:Clone()
-				model.Name = env.name
-				placeImported(model, env.pos, env.footprint, env.yaw)
-				model.Parent = buildingsFolder
-				importedZones[env.zone] = true
-				print("[NightShift] map: placed " .. env.name .. " (" .. env.zone .. " zone)")
-			end
-		end
-	end
-end
-
--- Fallback shack for any zone whose import failed to load, so a zone
--- is never just an empty clearing.
-for _, env in IMPORTED_ASSETS.environments do
-	if env.id ~= 0 and env.zone ~= "Hall" and not importedZones[env.zone] then
-		buildingShell(env.zone, env.pos, 24, 18, 12, { S = true },
-			Enum.Material.WoodPlanks, Color3.fromRGB(70, 54, 40))
-	end
-end
-
--- The Discussion Hall: abandoned lodge meets industrial control room.
--- The safest place on the map — the crew votes here each dawn.
-local hall = Instance.new("Folder")
-hall.Name = "DiscussionHall"
-hall.Parent = buildingsFolder
-do
-	local W, D, H = 44, 34, 14
-	local x0, x1, z0, z1 = -W / 2, W / 2, -D / 2, D / 2
-	local hallY = groundY(0, 0)
-	local base, top = hallY, hallY + H
-	local mat, color = Enum.Material.WoodPlanks, Color3.fromRGB(74, 58, 44)
-	if not importedZones.Hall then
-	part({ Parent = hall, Name = "Pad", Size = Vector3.new(W + 2, 0.4, D + 2),
-		Position = Vector3.new(0, hallY + 0.2, 0),
-		Color = Color3.fromRGB(96, 84, 70), Material = Enum.Material.WoodPlanks })
-	-- South wall: main exit, out to the exit road.
-	do
-		local a, b = Vector3.new(x0, 0, z0), Vector3.new(x1, 0, z0)
-		local mid = (a + b) / 2
-		local dir = (b - a).Unit
-		wallSeg(hall, a, mid - dir * 5, base, top, mat, color)
-		wallSeg(hall, mid + dir * 5, b, base, top, mat, color)
-		wallSeg(hall, mid - dir * 5, mid + dir * 5, base + 8, top, mat, color)
-	end
-	-- East wall: side door.
-	do
-		local a, b = Vector3.new(x1, 0, z0), Vector3.new(x1, 0, z1)
-		local mid = (a + b) / 2
-		local dir = (b - a).Unit
-		wallSeg(hall, a, mid - dir * 4, base, top, mat, color)
-		wallSeg(hall, mid + dir * 4, b, base, top, mat, color)
-		wallSeg(hall, mid - dir * 4, mid + dir * 4, base + 8, top, mat, color)
-	end
-	-- North wall: large windows.
-	do
-		local a, b = Vector3.new(x0, 0, z1), Vector3.new(x1, 0, z1)
-		wallSeg(hall, a, b, base, base + 3.5, mat, color)
-		wallSeg(hall, a, b, base + 7, top, mat, color)
-		part({ Parent = hall, Name = "Windows", Size = Vector3.new(W - 4, 3.5, 0.4),
-			Position = Vector3.new(0, base + 5.25, z1), Transparency = 0.55,
-			Color = Color3.fromRGB(150, 170, 175), Material = Enum.Material.Glass })
-		for _, mx in { -11, 0, 11 } do
-			part({ Parent = hall, Name = "WindowMullion", Size = Vector3.new(0.7, 3.5, 0.7),
-				Position = Vector3.new(mx, base + 5.25, z1), Color = color, Material = mat })
-		end
-	end
-	-- West wall: solid, with the fireplace and chimney.
-	wallSeg(hall, Vector3.new(x0, 0, z0), Vector3.new(x0, 0, z1), base, top, mat, color)
-	part({ Parent = hall, Name = "Fireplace", Size = Vector3.new(1.8, 6, 5),
-		Position = Vector3.new(x0 + 1.2, base + 3, 6), Color = Color3.fromRGB(78, 68, 62), Material = Enum.Material.Brick })
-	local hearth = part({ Parent = hall, Name = "Hearth", Size = Vector3.new(0.6, 2.6, 2.6),
-		Position = Vector3.new(x0 + 2.2, base + 1.4, 6), Color = Color3.fromRGB(16, 12, 10), Material = Enum.Material.Slate })
-	local fireLight = Instance.new("PointLight")
-	fireLight.Range = 16
-	fireLight.Brightness = 1.6
-	fireLight.Color = Color3.fromRGB(255, 140, 50)
-	fireLight.Shadows = true
-	fireLight.Parent = hearth
-	pcall(function()
-		local fire = Instance.new("ParticleEmitter")
-		fire.Texture = "rbxasset://textures/particles/fire_main.dds"
-		fire.Size = NumberSequence.new(1.4, 0.4)
-		fire.Color = ColorSequence.new(Color3.fromRGB(255, 150, 60), Color3.fromRGB(180, 60, 20))
-		fire.Lifetime = NumberRange.new(0.5, 1.1)
-		fire.Rate = 14
-		fire.Speed = NumberRange.new(1.5, 3)
-		fire.LightEmission = 1
-		fire.Parent = hearth
-	end)
-	part({ Parent = hall, Name = "HallChimney", Size = Vector3.new(3.5, H + 8, 3.5),
-		Position = Vector3.new(x0 - 1, base + (H + 8) / 2, 6), Color = Color3.fromRGB(78, 68, 62), Material = Enum.Material.Brick })
-	-- Pitched roof: two slabs meeting at a ridge over the centerline
-	-- (positive X-rotation drops the far (+Z) edge, so the north slab
-	-- tilts down toward the eave and the pair peaks in the middle).
-	part({ Parent = hall, Name = "RoofSlabN", Size = Vector3.new(W + 3, 0.8, D / 2 + 3),
-		CFrame = CFrame.new(0, top + 2, D / 4) * CFrame.Angles(math.rad(16), 0, 0),
-		Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Slate })
-	part({ Parent = hall, Name = "RoofSlabS", Size = Vector3.new(W + 3, 0.8, D / 2 + 3),
-		CFrame = CFrame.new(0, top + 2, -D / 4) * CFrame.Angles(math.rad(-16), 0, 0),
-		Color = Color3.fromRGB(50, 44, 40), Material = Enum.Material.Slate })
-	-- Long wooden table, benches, and the voting terminal.
-	part({ Parent = hall, Name = "TableTop", Size = Vector3.new(16, 0.8, 5),
-		Position = Vector3.new(0, base + 2.9, 3), Color = Color3.fromRGB(104, 82, 58), Material = Enum.Material.WoodPlanks })
-	for _, tx in { -6.5, 6.5 } do
-		part({ Parent = hall, Name = "TableLeg", Size = Vector3.new(1.2, 2.5, 4.4),
-			Position = Vector3.new(tx, base + 1.25, 3), Color = Color3.fromRGB(84, 66, 48), Material = Enum.Material.Wood })
-	end
-	for _, bz in { -1.2, 7.2 } do
-		part({ Parent = hall, Name = "Bench", Size = Vector3.new(14, 0.5, 1.6),
-			Position = Vector3.new(0, base + 1.5, bz), Color = Color3.fromRGB(92, 72, 52), Material = Enum.Material.WoodPlanks })
-	end
-	end -- (procedural hall shell; skipped when the imported house is present)
-	part({ Parent = hall, Name = "VotingTerminal", Size = Vector3.new(3, 3.4, 1.6),
-		Position = Vector3.new(0, base + 1.7, -11), Color = Color3.fromRGB(60, 64, 66), Material = Enum.Material.DiamondPlate })
-	local screen = part({ Parent = hall, Name = "TerminalScreen", Size = Vector3.new(3.4, 2.2, 0.4),
-		CFrame = CFrame.new(0, base + 4.2, -10.8) * CFrame.Angles(math.rad(-12), 0, 0),
-		Color = Color3.fromRGB(70, 220, 190), Material = Enum.Material.Neon })
-	local screenLight = Instance.new("PointLight")
-	screenLight.Range = 10
-	screenLight.Brightness = 0.8
-	screenLight.Color = Color3.fromRGB(90, 220, 190)
-	screenLight.Parent = screen
-	-- Spawn points around the table.
-	for _, sp in {
-		Vector3.new(-6, 0, 8.6), Vector3.new(0, 0, 8.6), Vector3.new(6, 0, 8.6),
-		Vector3.new(-6, 0, -3), Vector3.new(6, 0, -3), Vector3.new(12, 0, 3),
-		Vector3.new(-12, 0, 3), Vector3.new(0, 0, -6.5),
-	} do
-		local s = Instance.new("SpawnLocation")
-		s.Size = Vector3.new(4, 1, 4)
-		s.Position = sp + Vector3.new(0, groundY(sp.X, sp.Z) + 0.8, 0)
-		s.Anchored = true
-		s.Transparency = 1
-		s.CanCollide = false
-		s.Neutral = true
-		s.Parent = spawnsFolder
-	end
-end
-
--- ---- Stage 4: props (perimeter fence, rocks, lights) ----
-print("[NightShift] map: props…")
--- Rusted perimeter fence, slightly ragged.
-do
-	local rng = Random.new(13)
-	local B = 120
-	local step = 12
-	for i = -B, B - step, step do
-		for _, spec in {
-			{ Vector3.new(i + step / 2, 0, -B), 0 }, { Vector3.new(i + step / 2, 0, B), 0 },
-			{ Vector3.new(-B, 0, i + step / 2), 90 }, { Vector3.new(B, 0, i + step / 2), 90 },
-		} do
-			part({ Parent = propsFolder, Name = "PerimeterFence", Size = Vector3.new(step + 0.4, 9, 0.6),
-				CFrame = CFrame.new(spec[1] + Vector3.new(0, groundY(spec[1].X, spec[1].Z) + 4.5, 0))
-					* CFrame.Angles(0, math.rad(spec[2] + rng:NextNumber(-2.5, 2.5)), 0),
-				Color = Color3.fromRGB(58, 52, 46), Material = Enum.Material.CorrodedMetal })
-		end
-	end
-end
-
--- Rocks: lone boulders plus a few big stacked formations.
-do
-	local rng = Random.new(31)
-	local function boulder(pos: Vector3, s: number)
-		part({ Parent = rocksFolder, Name = "Boulder",
-			Size = Vector3.new(s * rng:NextNumber(0.8, 1.4), s, s * rng:NextNumber(0.8, 1.4)),
-			CFrame = CFrame.new(Vector3.new(pos.X, groundY(pos.X, pos.Z) + s * 0.25, pos.Z))
-				* CFrame.Angles(math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360)), math.rad(rng:NextNumber(0, 360))),
-			Color = Color3.fromRGB(72, 74, 70), Material = Enum.Material.Rock })
-	end
-	for _ = 1, 40 do
-		local pos = Vector3.new(rng:NextNumber(-114, 114), 0, rng:NextNumber(-114, 114))
-		if scenerySpotFree(pos) then
-			boulder(pos, rng:NextNumber(2.5, 7))
-		end
-	end
-	-- Rock formations: clustered slabs big enough to hide behind.
-	for _, f in { Vector3.new(-15, 0, -55), Vector3.new(80, 0, 78), Vector3.new(-98, 0, 40) } do
-		for _ = 1, rng:NextInteger(3, 5) do
-			boulder(f + Vector3.new(rng:NextNumber(-6, 6), 0, rng:NextNumber(-6, 6)), rng:NextNumber(6, 10))
-		end
-	end
-end
-
--- Floodlights (on during the day shift) and red beacons (night).
-local facilityFixtures: { { fixture: Part, light: PointLight } } = {}
-local emergencyFixtures: { { fixture: Part, light: PointLight } } = {}
-for _, pos in {
-	Vector3.new(5, 0, -21), Vector3.new(52, 0, -46), Vector3.new(-58, 0, -46),
-	Vector3.new(-76, 0, 34), Vector3.new(88, 0, -20), Vector3.new(-26, 0, 56),
-} do
-	local fgy = groundY(pos.X, pos.Z)
-	part({ Parent = propsFolder, Name = "FloodlightPole", Size = Vector3.new(0.7, 13, 0.7),
-		Position = pos + Vector3.new(0, fgy + 6.5, 0), Color = Color3.fromRGB(60, 60, 62), Material = Enum.Material.Metal })
-	local head = part({ Parent = propsFolder, Name = "FloodlightHead", Size = Vector3.new(2.6, 1, 1.4),
-		Position = pos + Vector3.new(0.9, fgy + 13, 0),
-		Color = Color3.fromRGB(235, 240, 225), Material = Enum.Material.Neon })
-	local light = Instance.new("PointLight")
-	light.Range = 34
-	light.Brightness = 1.2
-	light.Color = Color3.fromRGB(225, 235, 215)
-	light.Shadows = true
-	light.Parent = head
-	table.insert(facilityFixtures, { fixture = head, light = light })
-end
-for _, bpos in { Vector3.new(14, 0, 14), Vector3.new(-90, 0, 28) } do
-	local bgy = groundY(bpos.X, bpos.Z)
-	part({ Parent = propsFolder, Name = "BeaconPole", Size = Vector3.new(0.6, 20, 0.6),
-		Position = bpos + Vector3.new(0, bgy + 10, 0), Color = Color3.fromRGB(56, 52, 50), Material = Enum.Material.Metal })
-	local fixture = part({ Parent = propsFolder, Name = "Beacon", Size = Vector3.new(1.1, 1.1, 1.1),
-		Position = bpos + Vector3.new(0, bgy + 20.5, 0), Color = Color3.fromRGB(70, 26, 26), Material = Enum.Material.SmoothPlastic })
-	local light = Instance.new("PointLight")
-	light.Range = 28
-	light.Brightness = 1.6
-	light.Color = Color3.fromRGB(255, 60, 50)
-	light.Shadows = true
-	light.Enabled = false
-	light.Parent = fixture
-	table.insert(emergencyFixtures, { fixture = fixture, light = light })
-end
-
--- Safe-zone lamp inside the hall (the gameplay anchor), plus vote ring.
-local hallGY = groundY(12, 9)
-local lampPost = part({ Name = "LampPost", Size = Vector3.new(1, 9, 1), Position = Vector3.new(12, hallGY + 4.5, 9),
-	Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.Metal, Parent = hall })
-local lampHead = part({ Name = "LampHead", Size = Vector3.new(2.4, 1.2, 2.4), Position = Vector3.new(12, hallGY + 9.6, 9),
-	Color = Color3.fromRGB(255, 235, 180), Material = Enum.Material.Neon, Parent = hall })
+-- A basic lamp + spawn cluster at the center, standing in for the
+-- Discussion Hall until Phase 3 rebuilds it properly.
+local centerY = groundY(0, 0)
+local lampPost = part({ Name = "LampPost", Size = Vector3.new(1, 9, 1), Position = Vector3.new(0, centerY + 4.5, 0),
+	Color = Color3.fromRGB(60, 60, 60), Material = Enum.Material.Metal, Parent = arena })
+local lampHead = part({ Name = "LampHead", Size = Vector3.new(2.4, 1.2, 2.4), Position = Vector3.new(0, centerY + 9.6, 0),
+	Color = Color3.fromRGB(255, 235, 180), Material = Enum.Material.Neon, Parent = arena })
 local lampLight = Instance.new("PointLight")
 lampLight.Range = SAFE_ZONE_RADIUS + 10
 lampLight.Brightness = 2.5
@@ -975,163 +503,25 @@ end)
 
 local safeRing = part({ Name = "SafeRing", Shape = Enum.PartType.Cylinder,
 	Size = Vector3.new(0.2, SAFE_ZONE_RADIUS * 2, SAFE_ZONE_RADIUS * 2),
-	CFrame = CFrame.new(0, groundY(0, 0) + 0.45, 0) * CFrame.Angles(0, 0, math.rad(90)),
+	CFrame = CFrame.new(0, centerY + 0.45, 0) * CFrame.Angles(0, 0, math.rad(90)),
 	Color = Color3.fromRGB(255, 230, 170), Material = Enum.Material.Neon, Transparency = 0.7, CanCollide = false })
 local _ = safeRing
 
-print("[NightShift] map: build complete")
-
--- ===================== YARD CLUTTER =====================
--- Crates, barrels, and pallets scattered across the site — cover and
--- hiding spots. Reshuffled every match so sightlines never get stale.
-local clutterFolder: Folder? = nil
-
-local function clutterSpotFree(pos: Vector3): boolean
-	if pos.Magnitude < SAFE_ZONE_RADIUS + 6 then
-		return false
-	end
-	if insideKeepClear(pos) then
-		return false
-	end
-	if nearGenerator(pos, 12) then
-		return false
-	end
-	if math.abs(pos.X) < 7 and pos.Z < -17 then
-		return false -- exit road
-	end
-	return true
+for _, sp in {
+	Vector3.new(-8, 0, 8), Vector3.new(0, 0, 10), Vector3.new(8, 0, 8),
+	Vector3.new(-8, 0, -6), Vector3.new(0, 0, -9), Vector3.new(8, 0, -6),
+} do
+	local s = Instance.new("SpawnLocation")
+	s.Size = Vector3.new(4, 1, 4)
+	s.Position = sp + Vector3.new(0, groundY(sp.X, sp.Z) + 0.8, 0)
+	s.Anchored = true
+	s.Transparency = 1
+	s.CanCollide = false
+	s.Neutral = true
+	s.Parent = spawnsFolder
 end
 
-local function makeCrateStack(folder: Folder, rng: Random, pos: Vector3)
-	local baseSize = rng:NextNumber(3.2, 4.2)
-	local yaw = math.rad(rng:NextNumber(0, 360))
-	local crate = Instance.new("Part")
-	crate.Name = "Crate"
-	crate.Size = Vector3.new(baseSize, baseSize, baseSize)
-	crate.CFrame = CFrame.new(pos + Vector3.new(0, baseSize / 2, 0)) * CFrame.Angles(0, yaw, 0)
-	crate.Anchored = true
-	crate.Material = Enum.Material.WoodPlanks
-	crate.Color = Color3.fromRGB(96, 78, 56)
-	crate.Parent = folder
-	if rng:NextNumber() > 0.45 then
-		local topSize = baseSize * rng:NextNumber(0.7, 0.95)
-		local top = crate:Clone()
-		top.Size = Vector3.new(topSize, topSize, topSize)
-		top.CFrame = CFrame.new(pos + Vector3.new(rng:NextNumber(-0.5, 0.5), baseSize + topSize / 2, rng:NextNumber(-0.5, 0.5)))
-			* CFrame.Angles(0, yaw + math.rad(rng:NextNumber(-30, 30)), 0)
-		top.Parent = folder
-	end
-end
-
-local function makeBarrelGroup(folder: Folder, rng: Random, pos: Vector3)
-	for b = 1, rng:NextInteger(1, 3) do
-		local offset = Vector3.new(rng:NextNumber(-3, 3), 0, rng:NextNumber(-3, 3))
-		local barrel = Instance.new("Part")
-		barrel.Name = "Barrel"
-		barrel.Shape = Enum.PartType.Cylinder
-		barrel.Size = Vector3.new(3.4, 2.6, 2.6)
-		if rng:NextNumber() > 0.75 then
-			-- Tipped over (cylinder axis is X, so this is lying down).
-			barrel.CFrame = CFrame.new(pos + offset + Vector3.new(0, 1.3, 0))
-				* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0)
-		else
-			barrel.CFrame = CFrame.new(pos + offset + Vector3.new(0, 1.7, 0))
-				* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), math.rad(90))
-		end
-		barrel.Anchored = true
-		barrel.Material = Enum.Material.CorrodedMetal
-		barrel.Color = Color3.fromRGB(110, 62, 40)
-		barrel.Parent = folder
-	end
-end
-
-local function makePallet(folder: Folder, rng: Random, pos: Vector3)
-	local pallet = Instance.new("Part")
-	pallet.Name = "Pallet"
-	pallet.Size = Vector3.new(4.4, 0.4, 4.4)
-	pallet.CFrame = CFrame.new(pos + Vector3.new(0, 0.2, 0))
-		* CFrame.Angles(0, math.rad(rng:NextNumber(0, 360)), 0)
-	pallet.Anchored = true
-	pallet.Material = Enum.Material.WoodPlanks
-	pallet.Color = Color3.fromRGB(88, 72, 52)
-	pallet.Parent = folder
-end
-
-local function generateClutter()
-	if clutterFolder then
-		clutterFolder:Destroy()
-	end
-	local folder = Instance.new("Folder")
-	folder.Name = "YardClutter"
-	folder.Parent = arena
-	clutterFolder = folder
-
-	local rng = Random.new()
-	for _ = 1, 60 do
-		local x, z = rng:NextNumber(-112, 112), rng:NextNumber(-112, 112)
-		local pos = Vector3.new(x, groundY(x, z), z)
-		if clutterSpotFree(pos) then
-			local choice = rng:NextInteger(1, 3)
-			if choice == 1 then
-				makeCrateStack(folder, rng, pos)
-			elseif choice == 2 then
-				makeBarrelGroup(folder, rng, pos)
-			else
-				makePallet(folder, rng, pos)
-			end
-		end
-	end
-end
-pcall(generateClutter) -- cosmetic: a scenery error must not stop the game
-
--- ===================== AMBIENT VFX =====================
--- Dust hanging in the air of the derelict hall, using a texture that
--- ships with the Roblox client (rbxasset://) so nothing needs the catalog.
-local function makeEmitterAnchor(name: string, pos: Vector3): Part
-	local anchor = Instance.new("Part")
-	anchor.Name = name
-	anchor.Size = Vector3.new(1, 1, 1)
-	anchor.Position = pos
-	anchor.Anchored = true
-	anchor.CanCollide = false
-	anchor.Transparency = 1
-	anchor.Parent = arena
-	return anchor
-end
-
-pcall(function()
-	local rng = Random.new(11)
-	for i = 1, 10 do
-		local angle = (i / 10) * math.pi * 2
-		local radius = rng:NextNumber(20, ARENA_SIZE / 2 - 16)
-		local anchor = makeEmitterAnchor("DustEmitter", Vector3.new(math.cos(angle) * radius, 7, math.sin(angle) * radius))
-		local dust = Instance.new("ParticleEmitter")
-		dust.Texture = "rbxasset://textures/particles/smoke_main.dds"
-		dust.Size = NumberSequence.new(rng:NextNumber(6, 9), rng:NextNumber(10, 14))
-		dust.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(0.3, 0.84),
-			NumberSequenceKeypoint.new(1, 1),
-		})
-		dust.Color = ColorSequence.new(Color3.fromRGB(150, 150, 148))
-		dust.Lifetime = NumberRange.new(8, 14)
-		dust.Rate = 1.5
-		dust.Speed = NumberRange.new(0.2, 0.7)
-		dust.SpreadAngle = Vector2.new(180, 40)
-		dust.Rotation = NumberRange.new(0, 360)
-		dust.RotSpeed = NumberRange.new(-3, 3)
-		dust.LightInfluence = 1
-		dust.Parent = anchor
-	end
-end)
-
--- ===================== AMBIENT SOUND =====================
-local ambientDaySound = makeSound({
-	SoundId = SOUND_IDS.ambientDay, Looped = true, Volume = 0.35, Parent = SoundService,
-})
-local ambientNightSound = makeSound({
-	SoundId = SOUND_IDS.ambientNight, Looped = true, Volume = 0.4, Parent = SoundService,
-})
+print("[NightShift] map: phase 1 (terrain) complete")
 
 -- ---- Stage 5: generators (one per named zone) ----
 local function buildGenerators()
@@ -1322,16 +712,8 @@ local function setDay()
 	colorGrade.Contrast = 0.06
 	colorGrade.TintColor = Color3.fromRGB(252, 250, 242)
 	sunRays.Intensity = 0.06
-	for _, f in facilityFixtures do
-		f.fixture.Material = Enum.Material.Neon
-		f.fixture.Color = Color3.fromRGB(235, 240, 225)
-		f.light.Enabled = true
-	end
-	for _, e in emergencyFixtures do
-		e.fixture.Material = Enum.Material.SmoothPlastic
-		e.fixture.Color = Color3.fromRGB(70, 26, 26)
-		e.light.Enabled = false
-	end
+	-- Fixture-based lighting (floodlights/beacons) returns with the
+	-- Props phase; only the center lamp and atmosphere react for now.
 	if ambientNightSound.IsPlaying then ambientNightSound:Stop() end
 	if not ambientDaySound.IsPlaying then ambientDaySound:Play() end
 end
@@ -1351,16 +733,6 @@ local function setNight()
 	colorGrade.Contrast = 0.16
 	colorGrade.TintColor = Color3.fromRGB(198, 220, 210) -- moonlit teal-green
 	sunRays.Intensity = 0
-	for _, f in facilityFixtures do
-		f.fixture.Material = Enum.Material.Metal
-		f.fixture.Color = Color3.fromRGB(70, 72, 68)
-		f.light.Enabled = false
-	end
-	for _, e in emergencyFixtures do
-		e.fixture.Material = Enum.Material.Neon
-		e.fixture.Color = Color3.fromRGB(255, 40, 40)
-		e.light.Enabled = true
-	end
 	if ambientDaySound.IsPlaying then ambientDaySound:Stop() end
 	if not ambientNightSound.IsPlaying then ambientNightSound:Play() end
 end
@@ -1834,8 +1206,7 @@ local function runMatch()
 		updateGeneratorVisual(g)
 	end
 
-	-- Reshuffle the clutter every match.
-	pcall(generateClutter)
+	-- Clutter reshuffle returns with the Props phase.
 
 	for _, c in roster do
 		c.player:LoadCharacter()
