@@ -235,31 +235,10 @@ task.spawn(function()
 	print("[Witchwood] shifted the whole expansion by " .. tostring(delta) .. " studs to sit on terrain")
 end)
 
--- ===== Flashlight tool (Creator Store mesh, players had none before) =====
-local FLASHLIGHT_ASSET_ID = 110700594151156 -- "Flashlight Handheld Lamp Dark Tool Light"
-local flashlightTemplate = nil
-task.spawn(function()
-	local ok, asset = pcall(function()
-		return game:GetService("InsertService"):LoadAsset(FLASHLIGHT_ASSET_ID)
-	end)
-	if not ok or not asset then
-		return
-	end
-	for _, d in ipairs(asset:GetDescendants()) do
-		if d:IsA("LuaSourceContainer") then
-			d:Destroy()
-		elseif d:IsA("BasePart") then
-			d.Anchored = false
-		end
-	end
-	for _, c in ipairs(asset:GetChildren()) do
-		if c:IsA("Model") or c:IsA("Tool") then
-			flashlightTemplate = c
-			break
-		end
-	end
-end)
-
+-- ===== Flashlight tool (procedural -- InsertService is blocked for
+-- third-party assets in a live server, confirmed by direct testing:
+-- "User is not authorized to access Asset". Built from parts instead,
+-- so it always renders with no external dependency.) =====
 local function giveFlashlight(plr)
 	local backpack = plr:FindFirstChildOfClass("Backpack")
 	if not backpack then
@@ -273,39 +252,40 @@ local function giveFlashlight(plr)
 	tool.RequiresHandle = true
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
-	handle.Size = Vector3.new(0.5, 0.5, 1.6)
-	handle.Color = Color3.fromRGB(40, 40, 40)
+	handle.Size = Vector3.new(0.5, 0.5, 1.8)
+	handle.Material = Enum.Material.Metal
+	handle.Color = Color3.fromRGB(45, 45, 48)
 	handle.Parent = tool
+	local grip = Instance.new("Part")
+	grip.Name = "Grip"
+	grip.Size = Vector3.new(0.56, 0.56, 0.7)
+	grip.Material = Enum.Material.Rubber
+	grip.Color = Color3.fromRGB(20, 20, 20)
+	grip.CFrame = handle.CFrame * CFrame.new(0, 0, 0.45)
+	grip.Parent = tool
+	local gripWeld = Instance.new("WeldConstraint")
+	gripWeld.Part0 = handle
+	gripWeld.Part1 = grip
+	gripWeld.Parent = grip
+	local lens = Instance.new("Part")
+	lens.Name = "Lens"
+	lens.Shape = Enum.PartType.Cylinder
+	lens.Size = Vector3.new(0.15, 0.5, 0.5)
+	lens.Material = Enum.Material.Neon
+	lens.Color = Color3.fromRGB(255, 250, 220)
+	lens.CFrame = handle.CFrame * CFrame.new(0, 0, -0.95) * CFrame.Angles(0, 0, math.rad(90))
+	lens.Parent = tool
+	local lensWeld = Instance.new("WeldConstraint")
+	lensWeld.Part0 = handle
+	lensWeld.Part1 = lens
+	lensWeld.Parent = lens
 	local spot = Instance.new("SpotLight")
 	spot.Range = 45
 	spot.Angle = 38
 	spot.Brightness = 4
 	spot.Face = Enum.NormalId.Front
 	spot.Color = Color3.fromRGB(255, 255, 240)
-	spot.Parent = handle
-	if flashlightTemplate then
-		pcall(function()
-			local mesh = flashlightTemplate:Clone()
-			local ext = mesh:GetExtentsSize()
-			pcall(function()
-				mesh:ScaleTo(1.8 / math.max(ext.X, ext.Y, ext.Z, 0.1))
-			end)
-			mesh:PivotTo(handle.CFrame)
-			for _, d in ipairs(mesh:GetDescendants()) do
-				if d:IsA("BasePart") then
-					d.Anchored = false
-					d.CanCollide = false
-					d.Massless = true
-					local w = Instance.new("WeldConstraint")
-					w.Part0 = handle
-					w.Part1 = d
-					w.Parent = d
-				end
-			end
-			handle.Transparency = 1
-			mesh.Parent = tool
-		end)
-	end
+	spot.Parent = lens
 	tool.Parent = backpack
 end
 
@@ -325,90 +305,150 @@ Players.PlayerAdded:Connect(function(p)
 	end)
 end)
 
--- ===== Landmark buildings (Creator Store): Camp House / Farm House / Warehouse / Factory =====
+-- ===== Landmark buildings (procedural -- InsertService is blocked for
+-- third-party Creator Store assets from a live server; confirmed by
+-- direct testing, all four asset IDs failed with "User is not
+-- authorized to access Asset". Built from parts/unions instead, so
+-- every zone always has a real building with no external dependency.) =====
 task.spawn(function()
-	local InsertService = game:GetService("InsertService")
 	local terrainInst = workspace:FindFirstChildOfClass("Terrain")
-
-	local function loadModel(assetId)
-		local model = nil
-		pcall(function()
-			local asset = InsertService:LoadAsset(assetId)
-			for _, d in ipairs(asset:GetDescendants()) do
-				if d:IsA("LuaSourceContainer") then
-					d:Destroy()
-				elseif d:IsA("BasePart") then
-					d.Anchored = true
-				end
-			end
-			local best, bestVol = nil, 0
-			for _, c in ipairs(asset:GetChildren()) do
-				if c:IsA("Model") then
-					local s = c:GetExtentsSize()
-					local v = s.X * s.Y * s.Z
-					if v > bestVol then
-						best, bestVol = c, v
-					end
-				end
-			end
-			if not best then
-				local wrap = Instance.new("Model")
-				for _, c in ipairs(asset:GetChildren()) do
-					if c:IsA("BasePart") then
-						c.Parent = wrap
-					end
-				end
-				if #wrap:GetChildren() > 0 then
-					best = wrap
-				end
-			end
-			model = best
-		end)
-		return model
-	end
+	local buildingsFolder = Instance.new("Folder")
+	buildingsFolder.Name = "LandmarkBuildings"
+	buildingsFolder.Parent = workspace
 
 	local function groundSnap(pos)
 		local rayParams = RaycastParams.new()
 		rayParams.FilterType = Enum.RaycastFilterType.Include
 		rayParams.FilterDescendantsInstances = terrainInst and { terrainInst } or {}
 		local result = workspace:Raycast(pos + Vector3.new(0, 300, 0), Vector3.new(0, -600, 0), rayParams)
-		return result and result.Position or pos
+		return result and result.Position.Y or pos.Y
 	end
 
-	local function place(model, pos, footprint, yawDeg)
-		local ext = model:GetExtentsSize()
-		local widest = math.max(ext.X, ext.Z, 0.1)
-		pcall(function()
-			model:ScaleTo(footprint / widest)
-		end)
-		model:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.rad(yawDeg), 0))
-		local bbCF, bbSize = model:GetBoundingBox()
-		local floorY = groundSnap(pos).Y
-		model:PivotTo(model:GetPivot() + Vector3.new(0, floorY - (bbCF.Position.Y - bbSize.Y / 2) - 0.4, 0))
+	local function part(props)
+		local p = Instance.new("Part")
+		p.Anchored = true
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
+		for k, v in pairs(props) do
+			p[k] = v
+		end
+		p.Parent = props.Parent or buildingsFolder
+		return p
+	end
+
+	local function wallSeg(folder, a, b, yBottom, yTop, mat, color)
+		local delta = Vector3.new(b.X - a.X, 0, b.Z - a.Z)
+		local len = delta.Magnitude
+		if len < 0.4 or yTop - yBottom < 0.4 then
+			return
+		end
+		local mid = (a + b) / 2
+		local yaw = math.atan2(delta.X, delta.Z)
+		part({
+			Name = "Wall",
+			Size = Vector3.new(0.9, yTop - yBottom, len),
+			CFrame = CFrame.new(mid.X, (yBottom + yTop) / 2, mid.Z) * CFrame.Angles(0, yaw, 0),
+			Material = mat,
+			Color = color,
+			Parent = folder,
+		})
+	end
+
+	-- One rectangular shell with a doorway on one side and a pitched roof.
+	local function buildShell(name, center, w, d, h, doorSide, mat, color, roofColor)
+		local base = groundSnap(center)
+		local f = Instance.new("Folder")
+		f.Name = name
+		f.Parent = buildingsFolder
+		part({
+			Name = "Pad",
+			Size = Vector3.new(w + 1.5, 0.4, d + 1.5),
+			Position = Vector3.new(center.X, base + 0.2, center.Z),
+			Color = Color3.fromRGB(70, 68, 64),
+			Material = Enum.Material.Concrete,
+			Parent = f,
+		})
+		local x0, x1, z0, z1 = center.X - w / 2, center.X + w / 2, center.Z - d / 2, center.Z + d / 2
+		local bottom, top = base, base + h
+		local sides = {
+			N = { Vector3.new(x0, 0, z1), Vector3.new(x1, 0, z1) },
+			S = { Vector3.new(x0, 0, z0), Vector3.new(x1, 0, z0) },
+			E = { Vector3.new(x1, 0, z0), Vector3.new(x1, 0, z1) },
+			W = { Vector3.new(x0, 0, z0), Vector3.new(x0, 0, z1) },
+		}
+		for side, ab in pairs(sides) do
+			local a, b = ab[1], ab[2]
+			if side == doorSide then
+				local mid = (a + b) / 2
+				local dir = (b - a).Unit
+				local doorHalf = math.min(4, w / 4)
+				wallSeg(f, a, mid - dir * doorHalf, bottom, top, mat, color)
+				wallSeg(f, mid + dir * doorHalf, b, bottom, top, mat, color)
+				wallSeg(f, mid - dir * doorHalf, mid + dir * doorHalf, bottom + h * 0.7, top, mat, color)
+			else
+				wallSeg(f, a, b, bottom, top, mat, color)
+			end
+		end
+		part({
+			Name = "RoofN",
+			Size = Vector3.new(w + 2, 0.7, d / 2 + 2),
+			CFrame = CFrame.new(center.X, top + 1.6, center.Z + d / 4) * CFrame.Angles(math.rad(18), 0, 0),
+			Color = roofColor,
+			Material = Enum.Material.Slate,
+			Parent = f,
+		})
+		part({
+			Name = "RoofS",
+			Size = Vector3.new(w + 2, 0.7, d / 2 + 2),
+			CFrame = CFrame.new(center.X, top + 1.6, center.Z - d / 4) * CFrame.Angles(math.rad(-18), 0, 0),
+			Color = roofColor,
+			Material = Enum.Material.Slate,
+			Parent = f,
+		})
+		return f, base
 	end
 
 	local center = Safe.Position
-	local buildingsFolder = Instance.new("Folder")
-	buildingsFolder.Name = "LandmarkBuildings"
-	buildingsFolder.Parent = workspace
 
-	local BUILDINGS = {
-		{ id = 109175553546833, name = "CampHouse", pos = center, footprint = 52, yaw = 180 }, -- "Big Log Cabin (UNFURNISHED)" -- Discussion Hall, spans the ward cluster
-		{ id = 12129034740, name = "FarmHouseAndLake", pos = center + Vector3.new(85, 0, -85), footprint = 58, yaw = 20 }, -- "abandoned barn" -- SE, riverbank
-		{ id = 128655727108731, name = "Warehouse", pos = center + Vector3.new(-85, 0, -85), footprint = 54, yaw = 200 }, -- "Abandoned building" -- SW, roofed ruins
-		{ id = 112448492652447, name = "Factory", pos = center + Vector3.new(85, 0, 85), footprint = 62, yaw = 300 }, -- "Industrial Factory Building" -- NE, elevated clearing
-	}
-	for _, b in ipairs(BUILDINGS) do
-		local model = loadModel(b.id)
-		if model then
-			model.Name = b.name
-			place(model, b.pos, b.footprint, b.yaw)
-			model.Parent = buildingsFolder
-			print("[Landmarks] placed " .. b.name)
-		else
-			print("[Landmarks] failed to load " .. b.name .. " (asset " .. b.id .. ")")
+	-- 1. Camp House: log cabin spanning the ward cluster at the center,
+	-- containing the existing SafeZone_Lamp/Ring as its "porch light".
+	buildShell("CampHouse", center, 56, 44, 13, "S", Enum.Material.Wood, Color3.fromRGB(96, 68, 44), Color3.fromRGB(50, 38, 30))
+
+	-- 2. Farm House & Lake: red barn, SE, double-door motif toward center.
+	local farmCenter = center + Vector3.new(85, 0, -85)
+	local farmFolder, farmBase = buildShell("FarmHouseAndLake", farmCenter, 30, 22, 12, "N", Enum.Material.WoodPlanks, Color3.fromRGB(120, 40, 34), Color3.fromRGB(50, 46, 42))
+	part({ Name = "Silo", Shape = Enum.PartType.Cylinder, Size = Vector3.new(14, 5, 5),
+		CFrame = CFrame.new(farmCenter.X + 20, farmBase + 7, farmCenter.Z) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(150, 150, 150), Material = Enum.Material.Metal, Parent = farmFolder })
+
+	-- 3. Warehouse: decaying grey concrete, SW, small tight doorway,
+	-- fully roofed (no windows) for absolute cover.
+	buildShell("Warehouse", center + Vector3.new(-85, 0, -85), 26, 20, 10, "E", Enum.Material.Concrete, Color3.fromRGB(58, 58, 56), Color3.fromRGB(30, 30, 30))
+
+	-- 4. Factory: industrial shed, NE, with a chainlink-style perimeter
+	-- (three gaps left open = three approach paths) and pipe clutter.
+	local factoryCenter = center + Vector3.new(85, 0, 85)
+	local factoryFolder, factoryBase = buildShell("Factory", factoryCenter, 34, 26, 14, "W", Enum.Material.CorrodedMetal, Color3.fromRGB(70, 60, 52), Color3.fromRGB(40, 40, 40))
+	for i = 1, 8 do
+		if i ~= 2 and i ~= 5 and i ~= 7 then
+			local angle = (i / 8) * math.pi * 2
+			local px = factoryCenter.X + math.cos(angle) * 26
+			local pz = factoryCenter.Z + math.sin(angle) * 26
+			local py = groundSnap(Vector3.new(px, 0, pz))
+			part({ Name = "FenceLink", Size = Vector3.new(0.3, 6, 8), Position = Vector3.new(px, py + 3, pz),
+				Orientation = Vector3.new(0, math.deg(angle) + 90, 0), Transparency = 0.4,
+				Color = Color3.fromRGB(140, 140, 140), Material = Enum.Material.DiamondPlate, Parent = factoryFolder })
 		end
 	end
+	for _, off in ipairs({ Vector3.new(6, 0, 4), Vector3.new(-4, 0, -6) }) do
+		local px, pz = factoryCenter.X + off.X, factoryCenter.Z + off.Z
+		local py = groundSnap(Vector3.new(px, 0, pz))
+		part({ Name = "Pipe", Shape = Enum.PartType.Cylinder, Size = Vector3.new(9, 1.4, 1.4),
+			CFrame = CFrame.new(px, py + 1.5, pz) * CFrame.Angles(0, 0, math.rad(90)),
+			Color = Color3.fromRGB(90, 70, 50), Material = Enum.Material.CorrodedMetal, Parent = factoryFolder })
+	end
+
+	print("[Landmarks] built CampHouse, FarmHouseAndLake, Warehouse, Factory (procedural)")
 end)
 
 -- The Camp House brief calls for "a high-intensity, flickering
