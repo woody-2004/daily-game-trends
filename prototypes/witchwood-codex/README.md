@@ -16,6 +16,24 @@ different tool ("Codex") before this repo's assistant ever touched it.
   structures (Smithy, Mill, Dock, Bridge, Witch Hut, Rune Tower, a House,
   a Cottage) instead of leaving them as unlabeled floating parts.
 
+## v2 additions
+
+- `v2_additions.lua` — appended on top of the v1 (diverse ward
+  placement) script. Adds:
+  - A fix for the Codex_Expanded_Map_Witchwood group sitting
+    underground/underwater: raycasts under one reference part to find
+    the real terrain surface, then shifts every part in the group by
+    that same delta so relative spacing (e.g. the Witch Hut's base and
+    roof) stays intact.
+  - A flashlight tool (players had none before), meshed with a free
+    Creator Store asset ("Flashlight Handheld Lamp Dark Tool Light").
+  - Four landmark buildings from the Creator Store, placed relative to
+    the existing SafeZone_Lamp: a log cabin at center (Discussion
+    Hall), an abandoned barn to the SE (Farm House), an abandoned
+    building to the SW (Warehouse), and an industrial factory to the
+    NE — matching the building-placement-matrix brief.
+  - A flicker on the existing SafeZone_Lamp's light.
+
 ## How the update was made
 
 The only change made to the live place was a **surgical binary patch**:
