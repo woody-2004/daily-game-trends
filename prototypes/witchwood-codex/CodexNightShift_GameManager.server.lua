@@ -235,10 +235,40 @@ task.spawn(function()
 	print("[Witchwood] shifted the whole expansion by " .. tostring(delta) .. " studs to sit on terrain")
 end)
 
--- ===== Flashlight tool (procedural -- InsertService is blocked for
--- third-party assets in a live server, confirmed by direct testing:
--- "User is not authorized to access Asset". Built from parts instead,
--- so it always renders with no external dependency.) =====
+-- ===== Flashlight tool: try the real Creator Store mesh first, fall back
+-- to a procedural part-built flashlight (guaranteed, no external
+-- dependency) if the load fails. Logs which path was used so the result
+-- can be confirmed live from the Output window. =====
+local FLASHLIGHT_ASSET_ID = 110700594151156
+local flashlightTemplate = nil
+local flashlightLoadDone = false
+task.spawn(function()
+	local ok, asset = pcall(function()
+		return game:GetService("InsertService"):LoadAsset(FLASHLIGHT_ASSET_ID)
+	end)
+	if ok and asset then
+		for _, d in ipairs(asset:GetDescendants()) do
+			if d:IsA("LuaSourceContainer") then
+				d:Destroy()
+			elseif d:IsA("BasePart") then
+				d.Anchored = false
+			end
+		end
+		for _, c in ipairs(asset:GetChildren()) do
+			if c:IsA("Model") or c:IsA("Tool") then
+				flashlightTemplate = c
+				break
+			end
+		end
+	end
+	if flashlightTemplate then
+		print("[Flashlight] InsertService SUCCEEDED for asset " .. FLASHLIGHT_ASSET_ID)
+	else
+		print("[Flashlight] InsertService failed for asset " .. FLASHLIGHT_ASSET_ID .. ": " .. tostring(asset) .. " -- using procedural fallback")
+	end
+	flashlightLoadDone = true
+end)
+
 local function giveFlashlight(plr)
 	local backpack = plr:FindFirstChildOfClass("Backpack")
 	if not backpack then
@@ -246,6 +276,11 @@ local function giveFlashlight(plr)
 	end
 	if backpack:FindFirstChild("Flashlight") or (plr.Character and plr.Character:FindFirstChild("Flashlight")) then
 		return
+	end
+	local waited = 0
+	while not flashlightLoadDone and waited < 3 do
+		task.wait(0.1)
+		waited += 0.1
 	end
 	local tool = Instance.new("Tool")
 	tool.Name = "Flashlight"
@@ -256,6 +291,43 @@ local function giveFlashlight(plr)
 	handle.Material = Enum.Material.Metal
 	handle.Color = Color3.fromRGB(45, 45, 48)
 	handle.Parent = tool
+
+	if flashlightTemplate then
+		local ok = pcall(function()
+			local mesh = flashlightTemplate:Clone()
+			local ext = mesh:GetExtentsSize()
+			pcall(function()
+				mesh:ScaleTo(1.8 / math.max(ext.X, ext.Y, ext.Z, 0.1))
+			end)
+			mesh:PivotTo(handle.CFrame)
+			for _, d in ipairs(mesh:GetDescendants()) do
+				if d:IsA("BasePart") then
+					d.Anchored = false
+					d.CanCollide = false
+					d.Massless = true
+					local w = Instance.new("WeldConstraint")
+					w.Part0 = handle
+					w.Part1 = d
+					w.Parent = d
+				end
+			end
+			handle.Transparency = 1
+			local spot = Instance.new("SpotLight")
+			spot.Range = 45
+			spot.Angle = 38
+			spot.Brightness = 4
+			spot.Face = Enum.NormalId.Front
+			spot.Color = Color3.fromRGB(255, 255, 240)
+			spot.Parent = handle
+			mesh.Parent = tool
+		end)
+		if ok then
+			tool.Parent = backpack
+			return
+		end
+	end
+
+	-- Procedural fallback: two-tone metal/rubber handle with a neon lens.
 	local grip = Instance.new("Part")
 	grip.Name = "Grip"
 	grip.Size = Vector3.new(0.56, 0.56, 0.7)
@@ -305,16 +377,17 @@ Players.PlayerAdded:Connect(function(p)
 	end)
 end)
 
--- ===== Landmark buildings (procedural -- InsertService is blocked for
--- third-party Creator Store assets from a live server; confirmed by
--- direct testing, all four asset IDs failed with "User is not
--- authorized to access Asset". Built from parts/unions instead, so
--- every zone always has a real building with no external dependency.) =====
+-- ===== Landmark buildings: try the real Creator Store models first, fall
+-- back to procedural shells (guaranteed, no external dependency) for any
+-- that fail to load. Positioned by scanning the ACTUAL footprint of the
+-- pre-existing scene (Structures + Witchwood + CodexGameplay) and placing
+-- each building outside that footprint in a distinct compass direction
+-- (N / NE / SE / SW), so they never clump with or overlap the original
+-- hand-placed hamlet, however large or wherever centered it turns out to
+-- be. Logs which path (real asset vs fallback) each building used. =====
 task.spawn(function()
+	local InsertService = game:GetService("InsertService")
 	local terrainInst = workspace:FindFirstChildOfClass("Terrain")
-	local buildingsFolder = Instance.new("Folder")
-	buildingsFolder.Name = "LandmarkBuildings"
-	buildingsFolder.Parent = workspace
 
 	local function groundSnap(pos)
 		local rayParams = RaycastParams.new()
@@ -324,6 +397,90 @@ task.spawn(function()
 		return result and result.Position.Y or pos.Y
 	end
 
+	-- ---- Map the footprint of everything already in the scene, so the
+	-- new buildings can be kept clear of it regardless of its real size. ----
+	local minX, maxX, minZ, maxZ = math.huge, -math.huge, math.huge, -math.huge
+	local function scan(container)
+		if not container then
+			return
+		end
+		for _, inst in ipairs(container:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				local p = inst.Position
+				minX, maxX = math.min(minX, p.X), math.max(maxX, p.X)
+				minZ, maxZ = math.min(minZ, p.Z), math.max(maxZ, p.Z)
+			end
+		end
+	end
+	scan(workspace:FindFirstChild("Structures"))
+	scan(workspace:FindFirstChild("Codex_Expanded_Map_Witchwood"))
+	scan(workspace:FindFirstChild("CodexGameplay"))
+	if minX == math.huge then
+		minX, maxX, minZ, maxZ = -60, 60, -60, 60
+	end
+	local sceneCenter = Vector3.new((minX + maxX) / 2, 0, (minZ + maxZ) / 2)
+	local MARGIN = 55
+	local reachX = (maxX - minX) / 2 + MARGIN
+	local reachZ = (maxZ - minZ) / 2 + MARGIN
+	print(string.format(
+		"[Landmarks] existing scene footprint X[%.0f,%.0f] Z[%.0f,%.0f] -- placing buildings +-%.0f/+-%.0f beyond it",
+		minX, maxX, minZ, maxZ, reachX, reachZ
+	))
+
+	local function loadModel(assetId)
+		local model, err = nil, nil
+		local ok, e = pcall(function()
+			local asset = InsertService:LoadAsset(assetId)
+			for _, d in ipairs(asset:GetDescendants()) do
+				if d:IsA("LuaSourceContainer") then
+					d:Destroy()
+				elseif d:IsA("BasePart") then
+					d.Anchored = true
+				end
+			end
+			local best, bestVol = nil, 0
+			for _, c in ipairs(asset:GetChildren()) do
+				if c:IsA("Model") then
+					local s = c:GetExtentsSize()
+					local v = s.X * s.Y * s.Z
+					if v > bestVol then
+						best, bestVol = c, v
+					end
+				end
+			end
+			if not best then
+				local wrap = Instance.new("Model")
+				for _, c in ipairs(asset:GetChildren()) do
+					if c:IsA("BasePart") then
+						c.Parent = wrap
+					end
+				end
+				if #wrap:GetChildren() > 0 then
+					best = wrap
+				end
+			end
+			model = best
+		end)
+		if not ok then
+			err = e
+		end
+		return model, err
+	end
+
+	local function placeModel(model, pos, footprint, yawDeg)
+		local ext = model:GetExtentsSize()
+		local widest = math.max(ext.X, ext.Z, 0.1)
+		pcall(function()
+			model:ScaleTo(footprint / widest)
+		end)
+		model:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.rad(yawDeg), 0))
+		local bbCF, bbSize = model:GetBoundingBox()
+		local floorY = groundSnap(pos)
+		model:PivotTo(model:GetPivot() + Vector3.new(0, floorY - (bbCF.Position.Y - bbSize.Y / 2) - 0.4, 0))
+	end
+
+	-- ---- Procedural fallback shells (used only for buildings whose real
+	-- asset fails to load) ----
 	local function part(props)
 		local p = Instance.new("Part")
 		p.Anchored = true
@@ -332,7 +489,7 @@ task.spawn(function()
 		for k, v in pairs(props) do
 			p[k] = v
 		end
-		p.Parent = props.Parent or buildingsFolder
+		p.Parent = props.Parent
 		return p
 	end
 
@@ -354,12 +511,10 @@ task.spawn(function()
 		})
 	end
 
-	-- One rectangular shell with a doorway on one side and a pitched roof.
 	local function buildShell(name, center, w, d, h, doorSide, mat, color, roofColor)
 		local base = groundSnap(center)
 		local f = Instance.new("Folder")
 		f.Name = name
-		f.Parent = buildingsFolder
 		part({
 			Name = "Pad",
 			Size = Vector3.new(w + 1.5, 0.4, d + 1.5),
@@ -408,47 +563,60 @@ task.spawn(function()
 		return f, base
 	end
 
-	local center = Safe.Position
+	local buildingsFolder = Instance.new("Folder")
+	buildingsFolder.Name = "LandmarkBuildings"
+	buildingsFolder.Parent = workspace
 
-	-- 1. Camp House: log cabin spanning the ward cluster at the center,
-	-- containing the existing SafeZone_Lamp/Ring as its "porch light".
-	buildShell("CampHouse", center, 56, 44, 13, "S", Enum.Material.Wood, Color3.fromRGB(96, 68, 44), Color3.fromRGB(50, 38, 30))
+	local BUILDINGS = {
+		{ id = 109175553546833, name = "CampHouse", dir = Vector3.new(0, 0, 1), footprint = 52, yaw = 180,
+			shell = { w = 56, d = 44, h = 13, door = "S", mat = Enum.Material.Wood, color = Color3.fromRGB(96, 68, 44), roof = Color3.fromRGB(50, 38, 30) } },
+		{ id = 12129034740, name = "FarmHouseAndLake", dir = Vector3.new(1, 0, -1), footprint = 58, yaw = 20,
+			shell = { w = 30, d = 22, h = 12, door = "N", mat = Enum.Material.WoodPlanks, color = Color3.fromRGB(120, 40, 34), roof = Color3.fromRGB(50, 46, 42) } },
+		{ id = 128655727108731, name = "Warehouse", dir = Vector3.new(-1, 0, -1), footprint = 54, yaw = 200,
+			shell = { w = 26, d = 20, h = 10, door = "E", mat = Enum.Material.Concrete, color = Color3.fromRGB(58, 58, 56), roof = Color3.fromRGB(30, 30, 30) } },
+		{ id = 112448492652447, name = "Factory", dir = Vector3.new(1, 0, 1), footprint = 62, yaw = 300,
+			shell = { w = 34, d = 26, h = 14, door = "W", mat = Enum.Material.CorrodedMetal, color = Color3.fromRGB(70, 60, 52), roof = Color3.fromRGB(40, 40, 40) } },
+	}
 
-	-- 2. Farm House & Lake: red barn, SE, double-door motif toward center.
-	local farmCenter = center + Vector3.new(85, 0, -85)
-	local farmFolder, farmBase = buildShell("FarmHouseAndLake", farmCenter, 30, 22, 12, "N", Enum.Material.WoodPlanks, Color3.fromRGB(120, 40, 34), Color3.fromRGB(50, 46, 42))
-	part({ Name = "Silo", Shape = Enum.PartType.Cylinder, Size = Vector3.new(14, 5, 5),
-		CFrame = CFrame.new(farmCenter.X + 20, farmBase + 7, farmCenter.Z) * CFrame.Angles(0, 0, math.rad(90)),
-		Color = Color3.fromRGB(150, 150, 150), Material = Enum.Material.Metal, Parent = farmFolder })
-
-	-- 3. Warehouse: decaying grey concrete, SW, small tight doorway,
-	-- fully roofed (no windows) for absolute cover.
-	buildShell("Warehouse", center + Vector3.new(-85, 0, -85), 26, 20, 10, "E", Enum.Material.Concrete, Color3.fromRGB(58, 58, 56), Color3.fromRGB(30, 30, 30))
-
-	-- 4. Factory: industrial shed, NE, with a chainlink-style perimeter
-	-- (three gaps left open = three approach paths) and pipe clutter.
-	local factoryCenter = center + Vector3.new(85, 0, 85)
-	local factoryFolder, factoryBase = buildShell("Factory", factoryCenter, 34, 26, 14, "W", Enum.Material.CorrodedMetal, Color3.fromRGB(70, 60, 52), Color3.fromRGB(40, 40, 40))
-	for i = 1, 8 do
-		if i ~= 2 and i ~= 5 and i ~= 7 then
-			local angle = (i / 8) * math.pi * 2
-			local px = factoryCenter.X + math.cos(angle) * 26
-			local pz = factoryCenter.Z + math.sin(angle) * 26
-			local py = groundSnap(Vector3.new(px, 0, pz))
-			part({ Name = "FenceLink", Size = Vector3.new(0.3, 6, 8), Position = Vector3.new(px, py + 3, pz),
-				Orientation = Vector3.new(0, math.deg(angle) + 90, 0), Transparency = 0.4,
-				Color = Color3.fromRGB(140, 140, 140), Material = Enum.Material.DiamondPlate, Parent = factoryFolder })
+	for _, b in ipairs(BUILDINGS) do
+		local pos = sceneCenter + Vector3.new(b.dir.X * reachX, 0, b.dir.Z * reachZ)
+		local model, err = loadModel(b.id)
+		if model then
+			model.Name = b.name
+			placeModel(model, pos, b.footprint, b.yaw)
+			model.Parent = buildingsFolder
+			print("[Landmarks] " .. b.name .. ": InsertService SUCCEEDED (asset " .. b.id .. ")")
+		else
+			print("[Landmarks] " .. b.name .. ": InsertService failed (asset " .. b.id .. "): " .. tostring(err) .. " -- using procedural fallback")
+			local sh = b.shell
+			local shellFolder, base = buildShell(b.name, pos, sh.w, sh.d, sh.h, sh.door, sh.mat, sh.color, sh.roof)
+			shellFolder.Parent = buildingsFolder
+			if b.name == "FarmHouseAndLake" then
+				part({ Name = "Silo", Shape = Enum.PartType.Cylinder, Size = Vector3.new(14, 5, 5),
+					CFrame = CFrame.new(pos.X + 20, base + 7, pos.Z) * CFrame.Angles(0, 0, math.rad(90)),
+					Color = Color3.fromRGB(150, 150, 150), Material = Enum.Material.Metal, Parent = shellFolder })
+			elseif b.name == "Factory" then
+				for i = 1, 8 do
+					if i ~= 2 and i ~= 5 and i ~= 7 then
+						local angle = (i / 8) * math.pi * 2
+						local px = pos.X + math.cos(angle) * 26
+						local pz = pos.Z + math.sin(angle) * 26
+						local py = groundSnap(Vector3.new(px, 0, pz))
+						part({ Name = "FenceLink", Size = Vector3.new(0.3, 6, 8), Position = Vector3.new(px, py + 3, pz),
+							Orientation = Vector3.new(0, math.deg(angle) + 90, 0), Transparency = 0.4,
+							Color = Color3.fromRGB(140, 140, 140), Material = Enum.Material.DiamondPlate, Parent = shellFolder })
+					end
+				end
+				for _, off in ipairs({ Vector3.new(6, 0, 4), Vector3.new(-4, 0, -6) }) do
+					local px, pz = pos.X + off.X, pos.Z + off.Z
+					local py = groundSnap(Vector3.new(px, 0, pz))
+					part({ Name = "Pipe", Shape = Enum.PartType.Cylinder, Size = Vector3.new(9, 1.4, 1.4),
+						CFrame = CFrame.new(px, py + 1.5, pz) * CFrame.Angles(0, 0, math.rad(90)),
+						Color = Color3.fromRGB(90, 70, 50), Material = Enum.Material.CorrodedMetal, Parent = shellFolder })
+				end
+			end
 		end
 	end
-	for _, off in ipairs({ Vector3.new(6, 0, 4), Vector3.new(-4, 0, -6) }) do
-		local px, pz = factoryCenter.X + off.X, factoryCenter.Z + off.Z
-		local py = groundSnap(Vector3.new(px, 0, pz))
-		part({ Name = "Pipe", Shape = Enum.PartType.Cylinder, Size = Vector3.new(9, 1.4, 1.4),
-			CFrame = CFrame.new(px, py + 1.5, pz) * CFrame.Angles(0, 0, math.rad(90)),
-			Color = Color3.fromRGB(90, 70, 50), Material = Enum.Material.CorrodedMetal, Parent = factoryFolder })
-	end
-
-	print("[Landmarks] built CampHouse, FarmHouseAndLake, Warehouse, Factory (procedural)")
 end)
 
 -- The Camp House brief calls for "a high-intensity, flickering

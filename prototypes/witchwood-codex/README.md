@@ -70,3 +70,33 @@ only the one script needed to change.
 
 Do not run `build_rbxlx.py` or `publish.sh` from `../night-shift-roblox/`
 against this place — those target a different universe/place entirely.
+
+## v4: retry real Creator Store assets, fix the "clumped in center" bug
+
+Two separate problems from v3, both addressed:
+
+1. **Asset quality.** After v3 shipped, the same 4 landmark buildings (and
+   the flashlight mesh) failed `InsertService:LoadAsset` with `"User is
+   not authorized to access Asset"`. The user reported changing something
+   asset-permission-related in the Creator Store/Dashboard and asked to
+   retry. v4 re-attempts `InsertService:LoadAsset` for the same 5 asset
+   IDs first; if a load now succeeds, that real model is scaled to the
+   target footprint and used. If it still fails, the exact v3 procedural
+   part-built shell/flashlight is used as a fallback — so the place always
+   renders a real building/tool either way, and the Output log states
+   which path each one took (`InsertService SUCCEEDED` / `failed ... using
+   procedural fallback`), which is the only way to confirm live whether
+   the new access actually changed anything, since this environment can't
+   run the Roblox client itself.
+2. **Positioning.** v3 placed all 4 buildings at fixed offsets from
+   `Safe.Position`, and Camp House was built exactly *at* `Safe.Position`
+   — which the user confirmed genuinely overlaps/clumps with the
+   pre-existing hand-placed hamlet (screenshot showed roofs intersecting,
+   ward lights poking through walls). v4 no longer hardcodes any offsets:
+   it scans every `BasePart` under `Structures`, `Codex_Expanded_Map_
+   Witchwood`, and `CodexGameplay` to compute the real bounding footprint
+   of the existing scene, then places each of the 4 buildings outside
+   that footprint (existing half-extent + 55-stud margin) in a distinct
+   compass direction — Camp House north, Factory northeast, Farm House
+   southeast, Warehouse southwest — so they can't clump with or overlap
+   the original art no matter how large or off-center it actually is.
