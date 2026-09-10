@@ -235,39 +235,26 @@ task.spawn(function()
 	print("[Witchwood] shifted the whole expansion by " .. tostring(delta) .. " studs to sit on terrain")
 end)
 
--- ===== Flashlight tool: try the real Creator Store mesh first, fall back
--- to a procedural part-built flashlight (guaranteed, no external
--- dependency) if the load fails. Logs which path was used so the result
--- can be confirmed live from the Output window. =====
-local FLASHLIGHT_ASSET_ID = 110700594151156
+-- ===== Flashlight tool: InsertService is a dead end for this mesh -- it's
+-- a free model made by another creator, not owned by this account, and
+-- Roblox only lets a live server InsertService:LoadAsset assets the
+-- experience's creator actually owns. There is no permission grant that
+-- fixes that for someone else's asset. Instead, this looks for a copy the
+-- asset's real owner (you) placed by hand in Studio's Toolbox: a Model or
+-- Tool named "FlashlightMesh" inside a workspace.ManualLandmarks folder.
+-- If it's there, it's used as-is. If not, falls back to a procedural
+-- part-built flashlight (guaranteed, no external dependency). =====
+local ManualLandmarks = workspace:FindFirstChild("ManualLandmarks")
 local flashlightTemplate = nil
-local flashlightLoadDone = false
-task.spawn(function()
-	local ok, asset = pcall(function()
-		return game:GetService("InsertService"):LoadAsset(FLASHLIGHT_ASSET_ID)
-	end)
-	if ok and asset then
-		for _, d in ipairs(asset:GetDescendants()) do
-			if d:IsA("LuaSourceContainer") then
-				d:Destroy()
-			elseif d:IsA("BasePart") then
-				d.Anchored = false
-			end
-		end
-		for _, c in ipairs(asset:GetChildren()) do
-			if c:IsA("Model") or c:IsA("Tool") then
-				flashlightTemplate = c
-				break
-			end
-		end
-	end
-	if flashlightTemplate then
-		print("[Flashlight] InsertService SUCCEEDED for asset " .. FLASHLIGHT_ASSET_ID)
+do
+	local manual = ManualLandmarks and ManualLandmarks:FindFirstChild("FlashlightMesh")
+	if manual and (manual:IsA("Model") or manual:IsA("Tool")) then
+		flashlightTemplate = manual
+		print("[Flashlight] using hand-placed ManualLandmarks.FlashlightMesh")
 	else
-		print("[Flashlight] InsertService failed for asset " .. FLASHLIGHT_ASSET_ID .. ": " .. tostring(asset) .. " -- using procedural fallback")
+		print("[Flashlight] no ManualLandmarks.FlashlightMesh found -- using procedural fallback")
 	end
-	flashlightLoadDone = true
-end)
+end
 
 local function giveFlashlight(plr)
 	local backpack = plr:FindFirstChildOfClass("Backpack")
@@ -276,11 +263,6 @@ local function giveFlashlight(plr)
 	end
 	if backpack:FindFirstChild("Flashlight") or (plr.Character and plr.Character:FindFirstChild("Flashlight")) then
 		return
-	end
-	local waited = 0
-	while not flashlightLoadDone and waited < 3 do
-		task.wait(0.1)
-		waited += 0.1
 	end
 	local tool = Instance.new("Tool")
 	tool.Name = "Flashlight"
@@ -377,17 +359,20 @@ Players.PlayerAdded:Connect(function(p)
 	end)
 end)
 
--- ===== Landmark buildings: try the real Creator Store models first, fall
--- back to procedural shells (guaranteed, no external dependency) for any
--- that fail to load. Positioned by scanning the ACTUAL footprint of the
--- pre-existing scene (Structures + Witchwood + CodexGameplay) and placing
--- each building outside that footprint in a distinct compass direction
--- (N / NE / SE / SW), so they never clump with or overlap the original
--- hand-placed hamlet, however large or wherever centered it turns out to
--- be. Logs which path (real asset vs fallback) each building used. =====
+-- ===== Landmark buildings: InsertService can't load these either (same
+-- other-creator-ownership wall as the flashlight above), so each one is
+-- looked up by name in workspace.ManualLandmarks -- a Model you placed by
+-- hand via Studio's Toolbox, e.g. named "CampHouse". If found, that real
+-- model is used (scaled and repositioned); if not, a procedural shell is
+-- built instead so the zone is never empty. Positions come from scanning
+-- the ACTUAL footprint of the pre-existing scene (Structures + Witchwood
+-- + CodexGameplay) and placing each building outside that footprint in a
+-- distinct compass direction (N / NE / SE / SW), so they never clump with
+-- or overlap the original hand-placed hamlet, however large or wherever
+-- centered it turns out to be. Logs which path each building used. =====
 task.spawn(function()
-	local InsertService = game:GetService("InsertService")
 	local terrainInst = workspace:FindFirstChildOfClass("Terrain")
+	local manualFolder = workspace:FindFirstChild("ManualLandmarks")
 
 	local function groundSnap(pos)
 		local rayParams = RaycastParams.new()
@@ -426,46 +411,6 @@ task.spawn(function()
 		"[Landmarks] existing scene footprint X[%.0f,%.0f] Z[%.0f,%.0f] -- placing buildings +-%.0f/+-%.0f beyond it",
 		minX, maxX, minZ, maxZ, reachX, reachZ
 	))
-
-	local function loadModel(assetId)
-		local model, err = nil, nil
-		local ok, e = pcall(function()
-			local asset = InsertService:LoadAsset(assetId)
-			for _, d in ipairs(asset:GetDescendants()) do
-				if d:IsA("LuaSourceContainer") then
-					d:Destroy()
-				elseif d:IsA("BasePart") then
-					d.Anchored = true
-				end
-			end
-			local best, bestVol = nil, 0
-			for _, c in ipairs(asset:GetChildren()) do
-				if c:IsA("Model") then
-					local s = c:GetExtentsSize()
-					local v = s.X * s.Y * s.Z
-					if v > bestVol then
-						best, bestVol = c, v
-					end
-				end
-			end
-			if not best then
-				local wrap = Instance.new("Model")
-				for _, c in ipairs(asset:GetChildren()) do
-					if c:IsA("BasePart") then
-						c.Parent = wrap
-					end
-				end
-				if #wrap:GetChildren() > 0 then
-					best = wrap
-				end
-			end
-			model = best
-		end)
-		if not ok then
-			err = e
-		end
-		return model, err
-	end
 
 	local function placeModel(model, pos, footprint, yawDeg)
 		local ext = model:GetExtentsSize()
@@ -568,26 +513,26 @@ task.spawn(function()
 	buildingsFolder.Parent = workspace
 
 	local BUILDINGS = {
-		{ id = 109175553546833, name = "CampHouse", dir = Vector3.new(0, 0, 1), footprint = 52, yaw = 180,
+		-- name matches what to call the Model you drop into workspace.ManualLandmarks
+		{ name = "CampHouse", dir = Vector3.new(0, 0, 1), footprint = 52, yaw = 180,
 			shell = { w = 56, d = 44, h = 13, door = "S", mat = Enum.Material.Wood, color = Color3.fromRGB(96, 68, 44), roof = Color3.fromRGB(50, 38, 30) } },
-		{ id = 12129034740, name = "FarmHouseAndLake", dir = Vector3.new(1, 0, -1), footprint = 58, yaw = 20,
+		{ name = "FarmHouseAndLake", dir = Vector3.new(1, 0, -1), footprint = 58, yaw = 20,
 			shell = { w = 30, d = 22, h = 12, door = "N", mat = Enum.Material.WoodPlanks, color = Color3.fromRGB(120, 40, 34), roof = Color3.fromRGB(50, 46, 42) } },
-		{ id = 128655727108731, name = "Warehouse", dir = Vector3.new(-1, 0, -1), footprint = 54, yaw = 200,
+		{ name = "Warehouse", dir = Vector3.new(-1, 0, -1), footprint = 54, yaw = 200,
 			shell = { w = 26, d = 20, h = 10, door = "E", mat = Enum.Material.Concrete, color = Color3.fromRGB(58, 58, 56), roof = Color3.fromRGB(30, 30, 30) } },
-		{ id = 112448492652447, name = "Factory", dir = Vector3.new(1, 0, 1), footprint = 62, yaw = 300,
+		{ name = "Factory", dir = Vector3.new(1, 0, 1), footprint = 62, yaw = 300,
 			shell = { w = 34, d = 26, h = 14, door = "W", mat = Enum.Material.CorrodedMetal, color = Color3.fromRGB(70, 60, 52), roof = Color3.fromRGB(40, 40, 40) } },
 	}
 
 	for _, b in ipairs(BUILDINGS) do
 		local pos = sceneCenter + Vector3.new(b.dir.X * reachX, 0, b.dir.Z * reachZ)
-		local model, err = loadModel(b.id)
-		if model then
-			model.Name = b.name
-			placeModel(model, pos, b.footprint, b.yaw)
-			model.Parent = buildingsFolder
-			print("[Landmarks] " .. b.name .. ": InsertService SUCCEEDED (asset " .. b.id .. ")")
+		local manual = manualFolder and manualFolder:FindFirstChild(b.name)
+		if manual and manual:IsA("Model") then
+			manual.Parent = buildingsFolder
+			placeModel(manual, pos, b.footprint, b.yaw)
+			print("[Landmarks] " .. b.name .. ": using hand-placed ManualLandmarks." .. b.name)
 		else
-			print("[Landmarks] " .. b.name .. ": InsertService failed (asset " .. b.id .. "): " .. tostring(err) .. " -- using procedural fallback")
+			print("[Landmarks] " .. b.name .. ": no ManualLandmarks entry found -- using procedural fallback")
 			local sh = b.shell
 			local shellFolder, base = buildShell(b.name, pos, sh.w, sh.d, sh.h, sh.door, sh.mat, sh.color, sh.roof)
 			shellFolder.Parent = buildingsFolder

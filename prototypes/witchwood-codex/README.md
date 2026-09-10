@@ -100,3 +100,35 @@ Two separate problems from v3, both addressed:
    compass direction — Camp House north, Factory northeast, Farm House
    southeast, Warehouse southwest — so they can't clump with or overlap
    the original art no matter how large or off-center it actually is.
+
+## v5: stop retrying InsertService, support hand-placed real assets
+
+Confirmed the 4 landmark building assets and the flashlight mesh are free
+models made by *other* Roblox creators, not owned by this account. That
+makes `InsertService:LoadAsset` a permanent dead end for them: Roblox
+only lets a live server load assets the experience's creator actually
+owns, and there is no API key scope, Open Cloud call, or Asset
+Permissions grant that can hand you rights to someone else's asset —
+`asset-permissions` only lets an asset's real owner grant others access,
+and that's not you here. v5 removes the InsertService retry entirely
+(it was dead code that could only ever fail for these 5 assets) and
+replaces it with a hand-placement path that always works regardless of
+ownership:
+
+- Before the game starts, place the real models yourself in Studio via
+  the Toolbox (which uses your own session, not `InsertService`) into a
+  `Folder` named `ManualLandmarks` directly under `Workspace`, naming
+  each Model exactly `CampHouse`, `FarmHouseAndLake`, `Warehouse`,
+  `Factory`, or `FlashlightMesh` — position doesn't matter.
+- At runtime, the script looks for each of those five by name. If found,
+  it uses that real model (scaled/repositioned with the same v4 corner
+  logic for the 4 buildings; cloned onto the flashlight Tool for the
+  mesh). If not found, it falls back to the same procedural shell/
+  flashlight as before, so every zone still has something rendered.
+- The Output log says which path each one took (`using hand-placed
+  ManualLandmarks.X` vs `no ManualLandmarks entry found -- using
+  procedural fallback`).
+
+If `ManualLandmarks` is never created, behavior is identical to v4's
+fallback appearance — nothing regresses for players if the manual step
+is skipped.
