@@ -1,0 +1,28 @@
+{
+  "title": "The Royal Bathroom",
+  "style": "Hyper-realistic 3D Pixar-style animation, fruit-headed people with human bodies, cinematic lighting, cozy lake-house setting, vertical 9:16",
+  "characters": {
+    "kiki": "Kiki, a man with a fuzzy brown kiwi fruit for a head (big expressive eyes, subtle smirk), wearing a grey hoodie and jeans",
+    "pearl": "Pearl, a woman with a soft pink-orange peach for a head (rosy blush, glossy lips, oversized sunglasses pushed up), wearing a white sundress and a big straw sun hat",
+    "parents": "an older couple with a cantaloupe head and a honeydew melon head, wearing matching cardigans",
+    "kids": "a crowd of small children with blueberry heads in colorful swimsuits"
+  },
+  "shots": [
+    {"id": "p1_01", "part": 1, "image": "Extreme close-up of a toilet paper roll on a holder in a dim bathroom, dramatic spotlight, dust in the air", "motion": "Slow dramatic push-in on the toilet paper roll, light flickers once", "vo": "Five days. Fourteen family members. One vacation house. And the sweetest revenge of my life cost me absolutely nothing."},
+    {"id": "p1_02", "part": 1, "image": "Aerial view of a huge wooden lake house at golden hour, several cars pulling into the driveway", "motion": "Drone shot slowly circling the house as cars arrive", "vo": "Every year my whole family rents a huge house together. We live ten hours apart, so this is the one week we're all under one roof."},
+    {"id": "p1_03", "part": 1, "image": "{kids} pouring out of a minivan onto a lawn, {parents} laughing and waving behind them", "motion": "Kids run excitedly toward the camera, parents wave", "vo": "Parents, siblings, nieces, nephews, from age 1 to age 25."},
+    {"id": "p1_04", "part": 1, "image": "{pearl} bursting through the front door of the lake house dragging four suitcases, sunlight behind her", "motion": "She struts in confidently, hair and hat bouncing, suitcases rolling behind her", "vo": "My sister Pearl got there first. She always gets there first."},
+    {"id": "p1_05", "part": 1, "image": "Luxurious bedroom with a king bed, big window over a lake, and an open door to a private marble bathroom, glowing heavenly light", "motion": "Camera glides into the room, golden light rays shimmer", "vo": "She claimed the best room. Big bed. Lake view. Private bathroom."},
+    {"id": "p1_06", "part": 1, "image": "{pearl} sitting on the king bed sipping a smoothie, looking at {kiki} who stands in the doorway holding a backpack", "motion": "Pearl gestures politely with her smoothie; Kiki opens his mouth, then closes it", "vo": "PEARL: I'm totally open to hearing why you should have this room. Go ahead."},
+    {"id": "p1_07", "part": 1, "image": "{kiki} sitting on creaky basement stairs under a single bare bulb, talking to the camera like a reality TV confessional", "motion": "Bulb flickers, Kiki shrugs and speaks to camera", "vo": "KIKI: She had me. Zero arguments. Fair's fair."},
+    {"id": "p1_08", "part": 1, "image": "Small basement bedroom with a tiny window, a plain bed, one flickering bulb, a cute cartoon spider in the corner", "motion": "Kiki walks in and looks around; the spider waves one leg, Kiki waves back", "vo": "My room was in the basement. It was fine. Just... no bathroom."},
+    {"id": "p1_09", "part": 1, "image": "{kiki} in a hallway bathroom doorway, eyes going wide in shock", "motion": "Fast zoom onto Kiki's shocked eyes, then freeze", "vo": "Until day two, when I discovered the secret of the house."},
+    {"id": "p2_01", "part": 2, "image": "{kiki} holding up a thick, fluffy, quilted toilet paper roll that glows golden in a clean bathroom", "motion": "Kiki lifts the roll slowly, golden sparkles float around it", "vo": "The house had the good toilet paper. Soft. Fluffy. Classy."},
+    {"id": "p2_02", "part": 2, "image": "{kiki} peeking through a cracked door into a marble private bathroom; on the holder, a thin, see-through single-ply roll", "motion": "Kiki pokes the thin roll with one finger; it crinkles like sandpaper; he recoils", "vo": "Every bathroom had the good stuff. Every bathroom... except one."},
+    {"id": "p2_03", "part": 2, "image": "{kiki} on the basement stairs confessional, a slow sly smile spreading across his face", "motion": "Long pause, then a slow smile, then a small shrug", "vo": "KIKI: A good brother would have said something. ... Anyway."},
+    {"id": "p2_04", "part": 2, "image": "Summer vacation montage: {kids} splashing in a lake, the melon dad burning burgers on a grill, a board game night", "motion": "Fun quick cuts of splashing, smoke from the grill, laughing", "vo": "And because her bathroom was so convenient, she never once used another one. Five days."},
+    {"id": "p2_05", "part": 2, "image": "{pearl} walking out of her private bathroom a little stiffly, slightly uncomfortable expression; {kiki} at the dinner table in the background sipping lemonade, watching her", "motion": "Pearl walks awkwardly; Kiki's eyes follow her without blinking as he sips", "vo": "PEARL: Is it just me, or is this house kind of... rough? KIKI: Rough? I think it's lovely."},
+    {"id": "p2_06", "part": 2, "image": "The whole fruit family hugging goodbye in the driveway at sunset, {pearl} and {kiki} in front", "motion": "Group hug, Pearl waves, Kiki gives a knowing smile", "vo": "PEARL: Same house next year? KIKI: Absolutely. And you should definitely take the same room."},
+    {"id": "p2_07", "part": 2, "image": "{kiki} on the basement stairs confessional holding a fluffy toilet paper roll up like a trophy", "motion": "He raises the roll triumphantly and winks at the camera", "vo": "KIKI: So yes, Pearl. Enjoy your private bathroom. And your crappy toilet paper."}
+  ]
+}
